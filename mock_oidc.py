@@ -3,7 +3,6 @@
 
 import argparse
 import base64
-import json
 import os
 import secrets
 import tempfile
@@ -32,7 +31,7 @@ from cryptography.x509.oid import NameOID
 # ---------------------------
 def parse_args():
     p = argparse.ArgumentParser(
-        description="Mock OIDC IdP (Flask, single file, RFC7519-compliant timestamps)",
+        description="Mock OIDC IdP (Flask, single file, RFC7519 timestamps, optional PKCE)",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     p.add_argument("--port", type=int, default=4567, help="Port to listen on")
@@ -76,12 +75,19 @@ def parse_args():
     p.add_argument(
         "--ssl-quickboot",
         action="store_true",
-        help="Generate ephemeral self-signed SSL cert for the service AND a separate RSA keypair for token signing. Nothing persists across restarts.",
+        help="Generate ephemeral SSL cert for the service AND a separate RSA keypair for token signing (not persisted).",
     )
 
     # Optional explicit issuer override (otherwise inferred from request)
     p.add_argument(
         "--issuer", type=str, help="Override issuer (e.g., https://localhost:8443)"
+    )
+
+    # Optional PKCE support (off by default)
+    p.add_argument(
+        "--pkce",
+        action="store_true",
+        help="Enable PKCE support (accepts code_challenge on /authorize and enforces code_verifier on /token)",
     )
 
     return p.parse_args()
@@ -99,7 +105,6 @@ def now_utc() -> datetime:
 
 
 def now_ts() -> int:
-    # NumericDate per RFC7519: seconds since epoch
     return int(now_utc().timestamp())
 
 
@@ -145,35 +150,16 @@ def pem_bytes_public_cert_from_key(key, cn="MockOIDC Signing"):
     return cert.public_bytes(serialization.Encoding.PEM)
 
 
-def generate_self_signed_service_cert():
-    key = generate_rsa_keypair()
-    subject = issuer = x509.Name(
-        [x509.NameAttribute(NameOID.COMMON_NAME, "MockOIDC Service")]
-    )
-    cert = (
-        x509.CertificateBuilder()
-        .subject_name(subject)
-        .issuer_name(issuer)
-        .public_key(key.public_key())
-        .serial_number(x509.random_serial_number())
-        .not_valid_before(datetime.utcnow() - timedelta(minutes=1))
-        .not_valid_after(datetime.utcnow() + timedelta(days=365))
-        .add_extension(x509.BasicConstraints(ca=True, path_length=None), critical=True)
-        .add_extension(
-            x509.SubjectKeyIdentifier.from_public_key(key.public_key()), critical=False
-        )
-        .add_extension(
-            x509.AuthorityKeyIdentifier.from_issuer_public_key(key.public_key()),
-            critical=False,
-        )
-        .sign(private_key=key, algorithm=hashes.SHA256())
-    )
-    cert_pem = cert.public_bytes(serialization.Encoding.PEM)
-    key_pem = pem_bytes_private(key)
-    return cert_pem, key_pem
+def load_public_key_from_cert_or_key(pem_bytes: bytes):
+    # Try as X.509 cert first, else as a raw public key
+    try:
+        cert = x509.load_pem_x509_certificate(pem_bytes)
+        return cert.public_key()
+    except Exception:
+        return serialization.load_pem_public_key(pem_bytes)
 
 
-# Token signing keypair
+# Signing material
 if ARGS.ssl_quickboot:
     SIGNING_PRIV_KEY = generate_rsa_keypair()
     SIGNING_PRIV_PEM = pem_bytes_private(SIGNING_PRIV_KEY)
@@ -189,42 +175,42 @@ elif ARGS.cert and ARGS.key:
     with open(ARGS.cert, "rb") as f:
         SIGNING_CERT_PEM = f.read()
 else:
-    # Default to self-signed signing cert if nothing provided
+    # Default self-signed signing cert
     SIGNING_PRIV_KEY = generate_rsa_keypair()
     SIGNING_PRIV_PEM = pem_bytes_private(SIGNING_PRIV_KEY)
     SIGNING_CERT_PEM = pem_bytes_public_cert_from_key(
         SIGNING_PRIV_KEY, cn="MockOIDC Signing (Default)"
     )
 
-
-def load_public_key_from_cert_or_key(pem_bytes: bytes):
-    """
-    Robustly obtain a public key from either:
-      - a PEM-encoded X.509 certificate, or
-      - a PEM-encoded public key.
-    """
-    try:
-        cert = x509.load_pem_x509_certificate(pem_bytes)
-        return cert.public_key()
-    except Exception:
-        # Not a cert; try as a public key
-        return serialization.load_pem_public_key(pem_bytes)
-
-
 PUBLIC_KEY = load_public_key_from_cert_or_key(SIGNING_CERT_PEM)
 
-# Service SSL (HTTPS)
+# Service SSL
 SERVICE_SSL_CONTEXT = None
 TEMP_SERVICE_CERT_FILE = None
 TEMP_SERVICE_KEY_FILE = None
 if ARGS.ssl_quickboot:
-    svc_cert_pem, svc_key_pem = generate_self_signed_service_cert()
+    # generate a separate ephemeral service cert
+    svc_key = generate_rsa_keypair()
+    subject = issuer = x509.Name(
+        [x509.NameAttribute(NameOID.COMMON_NAME, "MockOIDC Service")]
+    )
+    svc_cert = (
+        x509.CertificateBuilder()
+        .subject_name(subject)
+        .issuer_name(issuer)
+        .public_key(svc_key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(datetime.utcnow() - timedelta(minutes=1))
+        .not_valid_after(datetime.utcnow() + timedelta(days=365))
+        .add_extension(x509.BasicConstraints(ca=True, path_length=None), critical=True)
+        .sign(private_key=svc_key, algorithm=hashes.SHA256())
+    )
     cf = tempfile.NamedTemporaryFile(delete=False)
     kf = tempfile.NamedTemporaryFile(delete=False)
-    cf.write(svc_cert_pem)
+    cf.write(svc_cert.public_bytes(serialization.Encoding.PEM))
     cf.flush()
     cf.close()
-    kf.write(svc_key_pem)
+    kf.write(pem_bytes_private(svc_key))
     kf.flush()
     kf.close()
     TEMP_SERVICE_CERT_FILE = cf.name
@@ -241,10 +227,15 @@ if TEMP_SERVICE_CERT_FILE and TEMP_SERVICE_KEY_FILE:
 # ---------------------------
 app = Flask(__name__)
 
-# Authorization codes: code -> { client_id, redirect_uri, scope, exp (datetime), nonce? }
+# Authorization codes: code -> {
+#   client_id, redirect_uri, scope, exp(datetime),
+#   nonce?,
+#   (PKCE) code_challenge?, code_challenge_method? ("S256" or "plain")
+# }
 AUTH_CODES = {}
-# Refresh tokens tracked by JTI for single-use rotation:
-# jti -> { client_id, scope, exp (datetime) }
+
+# Refresh token rotation tracking:
+# jti -> { client_id, scope, exp(datetime) }
 REFRESH_JTIS = {}
 
 
@@ -253,6 +244,10 @@ REFRESH_JTIS = {}
 # ---------------------------
 def base64url_uint(n: int) -> str:
     b = n.to_bytes((n.bit_length() + 7) // 8, byteorder="big")
+    return base64.urlsafe_b64encode(b).decode("ascii").rstrip("=")
+
+
+def base64url_no_pad(b: bytes) -> str:
     return base64.urlsafe_b64encode(b).decode("ascii").rstrip("=")
 
 
@@ -272,6 +267,7 @@ def issue_tokens(client_id: str, scope: str, nonce: str = None):
     sub = secrets.token_hex(16)
     iss = current_issuer()
     iat = now_ts()
+
     access_claims = {
         "sub": sub,
         "iss": iss,
@@ -325,6 +321,37 @@ def issue_tokens(client_id: str, scope: str, nonce: str = None):
     }
 
 
+def validate_pkce_if_needed(code_entry: dict, code_verifier: str):
+    """
+    Enforce PKCE only when --pkce is enabled.
+    - If enabled and code_entry contains a code_challenge, require a verifier.
+    - Support S256 (preferred) and plain.
+    """
+    if not ARGS.pkce:
+        return  # PKCE disabled: do nothing
+
+    cc = code_entry.get("code_challenge")
+    if not cc:
+        # PKCE enabled but no challenge associated with this code: reject
+        raise ValueError("pkce_required")
+
+    if not code_verifier:
+        raise ValueError("missing_code_verifier")
+
+    method = (code_entry.get("code_challenge_method") or "plain").upper()
+    if method == "PLAIN":
+        if code_verifier != cc:
+            raise ValueError("invalid_code_verifier")
+    elif method == "S256":
+        digest = hashes.Hash(hashes.SHA256())
+        digest.update(code_verifier.encode("ascii"))
+        computed = base64url_no_pad(digest.finalize())
+        if computed != cc:
+            raise ValueError("invalid_code_verifier")
+    else:
+        raise ValueError("unsupported_challenge_method")
+
+
 # ---------------------------
 # VIEWS
 # ---------------------------
@@ -340,6 +367,9 @@ LOGIN_HTML = """<!DOCTYPE html>
       <input type="hidden" name="redirect_uri" value="{{ redirect_uri }}">
       <input type="hidden" name="state" value="{{ state }}">
       <input type="hidden" name="nonce" value="{{ nonce }}">
+      <!-- PKCE params are passed by client in query; we preserve as hidden if present -->
+      <input type="hidden" name="code_challenge" value="{{ code_challenge }}">
+      <input type="hidden" name="code_challenge_method" value="{{ code_challenge_method }}">
       <input type="submit" value="Sign In">
     </form>
   </body>
@@ -354,6 +384,9 @@ LOGIN_HTML = """<!DOCTYPE html>
 def authorize_get():
     if request.args.get("response_type") != "code":
         return make_response("response_type must be 'code'", 400)
+
+    # If PKCE is enabled, we *accept* code_challenge(+method) coming from the client.
+    # We don't generate PKCE values here; client should.
     return render_template_string(
         LOGIN_HTML,
         scope=request.args.get("scope", "openid"),
@@ -361,6 +394,8 @@ def authorize_get():
         redirect_uri=request.args.get("redirect_uri", ""),
         state=request.args.get("state", ""),
         nonce=request.args.get("nonce", ""),
+        code_challenge=request.args.get("code_challenge", ""),
+        code_challenge_method=request.args.get("code_challenge_method", ""),
     )
 
 
@@ -371,8 +406,11 @@ def authorize_post():
     if not username or not password:
         return make_response("Missing username/password", 400)
 
+    # When PKCE is enabled, if a client provides code_challenge, we bind it to the auth code.
+    # If PKCE is enabled but challenge is missing, we still allow issuing the code,
+    # but token exchange will fail (pkce_required) to simulate a strict PKCE server.
     code = secrets.token_hex(16)
-    AUTH_CODES[code] = {
+    entry = {
         "client_id": request.form.get("client_id"),
         "redirect_uri": request.form.get("redirect_uri"),
         "scope": request.form.get("scope") or "openid",
@@ -380,7 +418,17 @@ def authorize_post():
         "nonce": request.form.get("nonce") or None,
     }
 
-    ru = urlparse(AUTH_CODES[code]["redirect_uri"])
+    if ARGS.pkce:
+        cc = request.form.get("code_challenge")
+        ccm = request.form.get("code_challenge_method") or "plain"
+        if cc:
+            entry["code_challenge"] = cc
+            entry["code_challenge_method"] = ccm
+
+    AUTH_CODES[code] = entry
+
+    # Redirect with code (and state if provided)
+    ru = urlparse(entry["redirect_uri"])
     q = dict(parse_qsl(ru.query))
     q["code"] = code
     st = request.form.get("state")
@@ -404,6 +452,45 @@ def token():
         if now_utc() > data["exp"]:
             return jsonify(error="expired_code"), 400
 
+        # Enforce PKCE when enabled
+        try:
+            validate_pkce_if_needed(data, request.form.get("code_verifier"))
+        except ValueError as e:
+            reason = str(e)
+            if reason == "pkce_required":
+                return (
+                    jsonify(
+                        error="invalid_request",
+                        error_description="PKCE required but no code_challenge associated",
+                    ),
+                    400,
+                )
+            elif reason == "missing_code_verifier":
+                return (
+                    jsonify(
+                        error="invalid_request",
+                        error_description="Missing code_verifier",
+                    ),
+                    400,
+                )
+            elif reason == "invalid_code_verifier":
+                return (
+                    jsonify(
+                        error="invalid_grant", error_description="Invalid code_verifier"
+                    ),
+                    400,
+                )
+            elif reason == "unsupported_challenge_method":
+                return (
+                    jsonify(
+                        error="invalid_request",
+                        error_description="Unsupported code_challenge_method",
+                    ),
+                    400,
+                )
+            else:
+                return jsonify(error="invalid_request"), 400
+
         client_id = request.form.get("client_id") or data["client_id"]
         scope_req = request.form.get("scope")
         scope = scope_req if scope_req else data["scope"]
@@ -416,13 +503,12 @@ def token():
             return jsonify(error="invalid_request"), 400
 
         try:
-            # With numeric exp/iat/nbf we can verify standard claims per RFC7519.
             decoded = jwt.decode(
                 refresh_token,
                 key=PUBLIC_KEY,
                 algorithms=["RS256"],
-                options={"require": ["exp", "iat", "nbf", "jti"]},  # enforce presence
-                audience=None,  # not verifying aud here; you could set it if desired
+                options={"require": ["exp", "iat", "nbf", "jti"]},
+                audience=None,
             )
         except Exception:
             return jsonify(error="invalid_grant"), 400
@@ -456,6 +542,7 @@ def token():
 @app.route("/.well-known/openid-configuration", methods=["GET"])
 def well_known():
     iss = ARGS.issuer.rstrip("/") if ARGS.issuer else current_issuer()
+    # Always advertise PKCE methods supported; enforcement is controlled by --pkce flag.
     return jsonify(
         {
             "issuer": iss,
@@ -465,6 +552,7 @@ def well_known():
             "response_types_supported": ["code"],
             "grant_types_supported": ["authorization_code", "refresh_token"],
             "id_token_signing_alg_values_supported": ["RS256"],
+            "code_challenge_methods_supported": ["S256", "plain"],
         }
     )
 
