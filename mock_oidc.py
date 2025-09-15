@@ -15,17 +15,17 @@ from urllib.parse import urlencode, urlparse, parse_qsl, urlunparse
 
 from flask import (
     Flask,
-    request,
-    redirect,
     jsonify,
     make_response,
+    redirect,
     render_template_string,
+    request,
 )
-import jwt
-
 from cryptography import x509
-from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import rsa
+import jwt
 from cryptography.x509.oid import NameOID
 
 KID = "mock-oidc-key"
@@ -156,20 +156,12 @@ def pem_bytes_public_cert_from_key(key, cn="MockOIDC Signing") -> bytes:
         .not_valid_before(datetime.utcnow() - timedelta(minutes=1))
         .not_valid_after(datetime.utcnow() + timedelta(days=365))
         .add_extension(x509.BasicConstraints(ca=True, path_length=None), critical=True)
-        .add_extension(
-            x509.SubjectKeyIdentifier.from_public_key(key.public_key()), critical=False
-        )
-        .add_extension(
-            x509.AuthorityKeyIdentifier.from_issuer_public_key(key.public_key()),
-            critical=False,
-        )
         .sign(private_key=key, algorithm=hashes.SHA256())
     )
     return cert.public_bytes(serialization.Encoding.PEM)
 
 
 def load_public_key_from_cert_or_key(pem_bytes: bytes):
-    """Load a public key from either an X.509 cert PEM or a raw public key PEM."""
     try:
         cert = x509.load_pem_x509_certificate(pem_bytes)
         return cert.public_key()
@@ -178,9 +170,11 @@ def load_public_key_from_cert_or_key(pem_bytes: bytes):
 
 
 # =========================
-# Signing Material
+# App & Signing Keys
 # =========================
-if ARGS.cert and ARGS.key:
+app = Flask(__name__)
+
+if ARGS.key and ARGS.cert:
     with open(ARGS.key, "rb") as f:
         SIGNING_PRIV_PEM = f.read()
     SIGNING_PRIV_KEY = serialization.load_pem_private_key(
@@ -219,44 +213,40 @@ if ARGS.ssl_quickboot:
         .add_extension(x509.BasicConstraints(ca=True, path_length=None), critical=True)
         .sign(private_key=svc_key, algorithm=hashes.SHA256())
     )
-    cf = tempfile.NamedTemporaryFile(delete=False)
-    kf = tempfile.NamedTemporaryFile(delete=False)
-    cf.write(svc_cert.public_bytes(serialization.Encoding.PEM))
-    cf.flush()
-    cf.close()
+    kf = tempfile.NamedTemporaryFile(delete=False, suffix=".key")
+    cf = tempfile.NamedTemporaryFile(delete=False, suffix=".crt")
+    _TEMP_SSL_FILES.extend([kf.name, cf.name])
     kf.write(pem_bytes_private(svc_key))
     kf.flush()
+    cf.write(svc_cert.public_bytes(serialization.Encoding.PEM))
+    cf.flush()
     kf.close()
+    cf.close()
     SERVICE_SSL_CONTEXT = (cf.name, kf.name)
-    _TEMP_SSL_FILES.extend([cf.name, kf.name])
+
 elif ARGS.ssl_cert and ARGS.ssl_key:
     SERVICE_SSL_CONTEXT = (ARGS.ssl_cert, ARGS.ssl_key)
 
+if _TEMP_SSL_FILES:
 
-@atexit.register
-def _cleanup_temp_ssl_files():
-    for f in _TEMP_SSL_FILES:
-        try:
-            os.remove(f)
-        except Exception:
-            pass
+    def _cleanup():
+        for f in _TEMP_SSL_FILES:
+            try:
+                os.remove(f)
+            except Exception:
+                pass
 
+    atexit.register(_cleanup)
 
 # =========================
-# Flask App & In-Memory Stores
+# In-Memory Stores
 # =========================
-app = Flask(__name__)
-
-# Authorization codes: code -> { client_id, redirect_uri, scope, exp (datetime), nonce?, code_challenge?, code_challenge_method? }
 AUTH_CODES = {}
-
-# Refresh tokens tracked by JTI for single-use rotation:
-# jti -> { client_id, scope, exp (datetime) }
 REFRESH_JTIS = {}
 
 
 # =========================
-# App Helpers (need request/app context)
+# Issuer & JWT Helpers
 # =========================
 def current_issuer():
     if ARGS.issuer:
@@ -274,6 +264,63 @@ def oauth_error(error: str, description: str, status: int = 400, headers: dict =
     """Standardized OAuth 2.0 error JSON (RFC 6749)."""
     payload = jsonify(error=error, error_description=description)
     return (payload, status) if headers is None else (payload, status, headers)
+
+
+def parse_basic_auth(header_value):
+    if not header_value or not header_value.lower().startswith("basic "):
+        return None, None
+    try:
+        decoded = base64.b64decode(header_value.split(" ", 1)[1]).decode("utf-8")
+        cid, csec = decoded.split(":", 1)
+        return cid, csec
+    except Exception:
+        return None, None
+
+
+def extract_client_auth(req):
+    """Return a dict with client_id, client_secret, method OR {'error':(code,desc)}.
+    Methods: 'client_secret_basic', 'client_secret_post', 'none'.
+    No registry: presence of a secret => confidential; absence => public.
+    """
+    cid_basic, csec_basic = parse_basic_auth(req.headers.get("Authorization"))
+    form_client_id = req.form.get("client_id")
+    form_client_secret = req.form.get("client_secret")
+
+    if cid_basic:
+        # Conflict if form client_secret also present
+        if form_client_secret:
+            return {
+                "error": (
+                    "invalid_request",
+                    "Multiple client authentication methods supplied.",
+                )
+            }
+        return {
+            "client_id": cid_basic,
+            "client_secret": csec_basic,
+            "method": "client_secret_basic",
+        }
+
+    if form_client_secret:
+        if not form_client_id:
+            return {
+                "error": (
+                    "invalid_client",
+                    "client_id required when using client_secret.",
+                )
+            }
+        return {
+            "client_id": form_client_id,
+            "client_secret": form_client_secret,
+            "method": "client_secret_post",
+        }
+
+    # Public client path (no secret). client_id may or may not be provided at this point.
+    if form_client_id:
+        return {"client_id": form_client_id, "client_secret": None, "method": "none"}
+
+    # Missing entirely; caller may still be able to resolve client_id from code/refresh payload.
+    return {"client_id": None, "client_secret": None, "method": "none"}
 
 
 def issue_tokens(client_id: str, scope: str, nonce: str = None):
@@ -339,8 +386,8 @@ def validate_pkce_if_needed(entry: dict, code_verifier: str):
         raise ValueError("pkce_required")
     if not code_verifier:
         raise ValueError("missing_code_verifier")
-    method = (entry.get("code_challenge_method") or "plain").upper()
-    if method == "PLAIN":
+    method = entry.get("code_challenge_method", "plain")
+    if method == "plain":
         if code_verifier != code_challenge:
             raise ValueError("invalid_code_verifier")
     elif method == "S256":
@@ -358,20 +405,75 @@ def validate_pkce_if_needed(entry: dict, code_verifier: str):
 # =========================
 LOGIN_HTML = """<!DOCTYPE html>
 <html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Mock OIDC Login</title>
+    <style>
+      body { font-family: -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif; background: #f7f7f7; padding: 2rem; }
+      .box { max-width: 520px; margin: 0 auto; background: #fff; border-radius: 12px; padding: 1.25rem 1.5rem; box-shadow: 0 4px 24px rgba(0,0,0,.06); }
+      label { display: block; margin-top: .75rem; font-weight: 600; }
+      input[type=text], input[type=password] { width: 100%; padding: .5rem .6rem; border: 1px solid #ddd; border-radius: .5rem; font-size: 14px; }
+      .row { display: grid; grid-template-columns: 1fr 1fr; gap: .5rem; }
+      .row > div { min-width: 0; }
+      .muted { color: #666; font-size: 13px; }
+      button { margin-top: 1rem; padding: .5rem .75rem; border: 1px solid #ccc; background: #fafafa; border-radius: .5rem; cursor: pointer; }
+      code { background: #fafafa; padding: .15rem .35rem; border: 1px solid #eee; border-radius: .25rem; }
+    </style>
+  </head>
   <body>
-    <h2>Mock OIDC Login</h2>
-    <form method="post" action="/authorize">
-      <label>Username: <input type="text" name="username"></label><br>
-      <label>Password: <input type="password" name="password"></label><br>
-      <label>Scopes: <input type="text" name="scope" value="{{ scope }}"></label><br>
-      <input type="hidden" name="client_id" value="{{ client_id }}">
-      <input type="hidden" name="redirect_uri" value="{{ redirect_uri }}">
-      <input type="hidden" name="state" value="{{ state }}">
-      <input type="hidden" name="nonce" value="{{ nonce }}">
-      <input type="hidden" name="code_challenge" value="{{ code_challenge }}">
-      <input type="hidden" name="code_challenge_method" value="{{ code_challenge_method }}">
-      <input type="submit" value="Sign In">
-    </form>
+    <div class="box">
+      <h2>Sign in</h2>
+      <form method="post" action="/authorize">
+        <label>username</label>
+        <input type="text" name="username" value="user@example.com" />
+        <label>password</label>
+        <input type="password" name="password" value="password" />
+
+        <div class="row">
+          <div>
+            <label>client_id</label>
+            <input type="text" name="client_id" value="{{ client_id }}" />
+          </div>
+          <div>
+            <label>redirect_uri</label>
+            <input type="text" name="redirect_uri" value="{{ redirect_uri }}" />
+          </div>
+        </div>
+
+        <div class="row">
+          <div>
+            <label>scope <span class="muted">(space-delimited)</span></label>
+            <input type="text" name="scope" value="{{ scope }}" />
+          </div>
+          <div>
+            <label>state</label>
+            <input type="text" name="state" value="{{ state }}" />
+          </div>
+        </div>
+
+        <div class="row">
+          <div>
+            <label>nonce</label>
+            <input type="text" name="nonce" value="{{ nonce }}" />
+          </div>
+          <div>
+            <label>code_challenge</label>
+            <input type="text" name="code_challenge" value="{{ code_challenge }}" />
+          </div>
+        </div>
+
+        <div class="row">
+          <div>
+            <label>code_challenge_method</label>
+            <input type="text" name="code_challenge_method" value="{{ code_challenge_method }}" />
+          </div>
+          <div></div>
+        </div>
+
+        <button type="submit">Continue</button>
+      </form>
+      <p class="muted">This page simulates a login form and sets up an authorization code bound to the <code>client_id</code>, <code>redirect_uri</code>, <code>scope</code>, and optional PKCE fields.</p>
+    </div>
   </body>
 </html>
 """
@@ -379,11 +481,11 @@ LOGIN_HTML = """<!DOCTYPE html>
 CALLBACK_HTML = """<!DOCTYPE html>
 <html>
   <head>
-    <meta charset="utf-8"/>
-    <title>OIDC Callback</title>
+    <meta charset="utf-8" />
+    <title>Callback</title>
     <style>
-      body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 2rem; }
-      .box { border: 1px solid #ddd; padding: 1rem; border-radius: .5rem; max-width: 700px; background: #fafafa; }
+      body { font-family: -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif; background: #f7f7f7; padding: 2rem; }
+      .box { max-width: 520px; margin: 0 auto; background: #fff; border-radius: 12px; padding: 1.25rem 1.5rem; box-shadow: 0 4px 24px rgba(0,0,0,.06); }
       code { background: #fff; padding: .25rem .5rem; border: 1px solid #eee; border-radius: .25rem; }
       button { padding: .5rem .75rem; border: 1px solid #ccc; border-radius: .5rem; cursor: pointer; }
       .muted { color: #666; }
@@ -393,7 +495,7 @@ CALLBACK_HTML = """<!DOCTYPE html>
     <div class="box">
       <h2>Callback</h2>
       {% if code %}
-        <p>You were supposed to catch this redirect! But since you're already here, here's the authorization code you requested:</p>
+        <p>You were supposed to catch this redirect! But s...e already here, here's the authorization code you requested:</p>
         <p><strong>code:</strong> <code id="auth-code">{{ code }}</code></p>
         {% if state %}<p class="muted"><strong>state:</strong> <code id="auth-state">{{ state }}</code></p>{% endif %}
         <p><button id="copy-btn">Copy code to clipboard</button></p>
@@ -414,14 +516,12 @@ CALLBACK_HTML = """<!DOCTYPE html>
             setTimeout(function(){ btn.textContent = 'Copy code to clipboard'; }, 1500);
           }, function () {
             var range = document.createRange();
-            range.selectNodeContents(el);
+            range.selectNode(el);
             var sel = window.getSelection();
             sel.removeAllRanges();
             sel.addRange(range);
-            try { document.execCommand('copy'); btn.textContent = 'Copied!'; }
-            catch (e) { btn.textContent = 'Copy failed'; }
+            try { document.execCommand('copy'); btn.textContent = 'Copied!'; } catch(e) {}
             setTimeout(function(){ btn.textContent = 'Copy code to clipboard'; }, 1500);
-            sel.removeAllRanges();
           });
         });
       })();
@@ -466,6 +566,7 @@ def authorize_post():
         "exp": now_utc() + timedelta(seconds=ARGS.auth_code_ttl),
         "nonce": request.form.get("nonce") or None,
     }
+
     if ARGS.pkce:
         cc = request.form.get("code_challenge")
         ccm = request.form.get("code_challenge_method") or "plain"
@@ -492,9 +593,19 @@ def authorize_post():
 def token():
     grant_type = request.form.get("grant_type")
 
+    # Parse client authentication (no registry; presence of secret => confidential)
+    auth = extract_client_auth(request)
+    if "error" in auth:
+        code, desc = auth["error"]
+        return oauth_error(code, desc)
+
+    provided_client_id = auth.get("client_id")
+    is_confidential = bool(auth.get("client_secret"))
+    auth_method = auth.get("method")
+
     if grant_type in ("authorization_code", "code"):
-        code = request.form.get("code")
-        data = AUTH_CODES.pop(code, None)
+        code_val = request.form.get("code")
+        data = AUTH_CODES.pop(code_val, None)
         if not data:
             return oauth_error(
                 "invalid_grant",
@@ -503,27 +614,42 @@ def token():
         if now_utc() > data["exp"]:
             return oauth_error("invalid_grant", "Authorization code has expired.")
 
-        # Optional PKCE verification
-        try:
-            validate_pkce_if_needed(data, request.form.get("code_verifier"))
-        except ValueError as e:
-            msg = str(e)
-            if msg == "pkce_required":
-                return oauth_error(
-                    "invalid_request",
-                    "PKCE required but no code_challenge associated with this code.",
-                )
-            if msg == "missing_code_verifier":
-                return oauth_error("invalid_request", "Missing code_verifier.")
-            if msg == "invalid_code_verifier":
-                return oauth_error("invalid_grant", "Invalid code_verifier.")
-            if msg == "unsupported_challenge_method":
-                return oauth_error(
-                    "invalid_request", "Unsupported code_challenge_method."
-                )
-            return oauth_error("invalid_request", "PKCE validation failed.")
+        # Resolve client_id; if provided, it must match code's client_id.
+        client_id = provided_client_id or data["client_id"]
+        if provided_client_id and provided_client_id != data["client_id"]:
+            return oauth_error(
+                "invalid_grant", "Code was issued to a different client."
+            )
 
-        client_id = request.form.get("client_id") or data["client_id"]
+        # PKCE rules:
+        # - If a code_challenge is present on the code, require a matching code_verifier.
+        # - Else, if --pkce is enabled and this appears to be a public client, require PKCE.
+        must_validate_pkce = False
+        if data.get("code_challenge"):
+            must_validate_pkce = True
+        elif ARGS.pkce and not is_confidential:
+            must_validate_pkce = True
+
+        if must_validate_pkce:
+            try:
+                validate_pkce_if_needed(data, request.form.get("code_verifier"))
+            except ValueError as e:
+                msg = str(e)
+                if msg == "pkce_required":
+                    return oauth_error(
+                        "invalid_request",
+                        "PKCE required but no code_challenge associated with this code.",
+                    )
+                if msg == "missing_code_verifier":
+                    return oauth_error("invalid_request", "Missing code_verifier.")
+                if msg == "invalid_code_verifier":
+                    return oauth_error("invalid_grant", "Invalid code_verifier.")
+                if msg == "unsupported_challenge_method":
+                    return oauth_error(
+                        "invalid_request", "Unsupported code_challenge_method."
+                    )
+                return oauth_error("invalid_request", "PKCE validation failed.")
+
         scope = request.form.get("scope") or data["scope"]
         tokens = issue_tokens(client_id=client_id, scope=scope, nonce=data.get("nonce"))
         return jsonify(tokens), 200
@@ -536,10 +662,9 @@ def token():
         try:
             decoded = jwt.decode(
                 refresh_token,
-                key=PUBLIC_KEY,
+                SIGNING_CERT_PEM,
                 algorithms=["RS256"],
-                options={"require": ["exp", "iat", "nbf", "jti"]},
-                audience=None,  # Not enforcing aud here
+                options={"verify_aud": False},
             )
         except Exception:
             return oauth_error(
@@ -557,7 +682,11 @@ def token():
         if now_utc() > entry["exp"]:
             return oauth_error("invalid_grant", "Refresh token has expired.")
 
-        client_id = request.form.get("client_id") or entry["client_id"]
+        # Resolve client_id similarly and ensure it matches the refresh token audience if provided
+        client_id = provided_client_id or entry["client_id"]
+        if provided_client_id and provided_client_id != entry["client_id"]:
+            return oauth_error("invalid_grant", "Refresh token audience mismatch.")
+
         scope = entry["scope"]
         req_scope = request.form.get("scope")
         if req_scope:
@@ -576,7 +705,8 @@ def token():
     else:
         return oauth_error(
             "unsupported_grant_type",
-            "The grant_type is not supported. Use authorization_code or refresh_token.",
+            "Grant type must be 'authorization_code' or 'refresh_token'.",
+            400,
         )
 
 
@@ -593,6 +723,12 @@ def well_known():
             "grant_types_supported": ["authorization_code", "refresh_token"],
             "id_token_signing_alg_values_supported": ["RS256"],
             "code_challenge_methods_supported": ["S256", "plain"],
+            "token_endpoint_auth_methods_supported": [
+                "client_secret_basic",
+                "client_secret_post",
+                "none",
+            ],
+            "subject_types_supported": ["public"],
         }
     )
 
