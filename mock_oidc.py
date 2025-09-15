@@ -495,7 +495,7 @@ CALLBACK_HTML = """<!DOCTYPE html>
     <div class="box">
       <h2>Callback</h2>
       {% if code %}
-        <p>You were supposed to catch this redirect! But s...e already here, here's the authorization code you requested:</p>
+        <p>You were supposed to catch this redirect! But since you're already here, here's the authorization code you requested:</p>
         <p><strong>code:</strong> <code id="auth-code">{{ code }}</code></p>
         {% if state %}<p class="muted"><strong>state:</strong> <code id="auth-state">{{ state }}</code></p>{% endif %}
         <p><button id="copy-btn">Copy code to clipboard</button></p>
