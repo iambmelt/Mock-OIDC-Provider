@@ -10,7 +10,14 @@ import tempfile
 from datetime import datetime, timedelta, timezone
 from urllib.parse import urlencode, urlparse, parse_qsl, urlunparse
 
-from flask import Flask, request, redirect, jsonify, make_response, render_template_string
+from flask import (
+    Flask,
+    request,
+    redirect,
+    jsonify,
+    make_response,
+    render_template_string,
+)
 import jwt
 
 # cryptography for RSA keypair + self-signed certs
@@ -29,25 +36,53 @@ def parse_args():
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     p.add_argument("--port", type=int, default=4567, help="Port to listen on")
-    p.add_argument("--auth-code-ttl", type=int, default=300, help="TTL (seconds) for authorization codes")
-    p.add_argument("--access-token-ttl", type=int, default=3600, help="TTL (seconds) for access tokens")
-    p.add_argument("--id-token-ttl", type=int, default=3600, help="TTL (seconds) for ID tokens")
-    p.add_argument("--refresh-ttl", type=int, default=14 * 3600, help="TTL (seconds) for refresh tokens")
+    p.add_argument(
+        "--auth-code-ttl",
+        type=int,
+        default=300,
+        help="TTL (seconds) for authorization codes",
+    )
+    p.add_argument(
+        "--access-token-ttl",
+        type=int,
+        default=3600,
+        help="TTL (seconds) for access tokens",
+    )
+    p.add_argument(
+        "--id-token-ttl", type=int, default=3600, help="TTL (seconds) for ID tokens"
+    )
+    p.add_argument(
+        "--refresh-ttl",
+        type=int,
+        default=14 * 3600,
+        help="TTL (seconds) for refresh tokens",
+    )
 
     # Token signing keypair (PEM files)
-    p.add_argument("--cert", type=str, help="Certificate PEM for token signing (public part)")
+    p.add_argument(
+        "--cert", type=str, help="Certificate PEM for token signing (public part)"
+    )
     p.add_argument("--key", type=str, help="Private key PEM for token signing")
 
     # HTTPS for the Flask service
-    p.add_argument("--ssl-cert", type=str, help="SSL certificate PEM for the HTTPS service")
-    p.add_argument("--ssl-key", type=str, help="SSL private key PEM for the HTTPS service")
+    p.add_argument(
+        "--ssl-cert", type=str, help="SSL certificate PEM for the HTTPS service"
+    )
+    p.add_argument(
+        "--ssl-key", type=str, help="SSL private key PEM for the HTTPS service"
+    )
 
     # Quickboot: ephemeral (in-memory) self-signed certs for service + separate keypair for signing
-    p.add_argument("--ssl-quickboot", action="store_true",
-                   help="Generate ephemeral self-signed SSL cert for the service AND a separate RSA keypair for token signing. Nothing persists across restarts.")
+    p.add_argument(
+        "--ssl-quickboot",
+        action="store_true",
+        help="Generate ephemeral self-signed SSL cert for the service AND a separate RSA keypair for token signing. Nothing persists across restarts.",
+    )
 
     # Optional explicit issuer override (otherwise inferred from request)
-    p.add_argument("--issuer", type=str, help="Override issuer (e.g., https://localhost:8443)")
+    p.add_argument(
+        "--issuer", type=str, help="Override issuer (e.g., https://localhost:8443)"
+    )
 
     return p.parse_args()
 
@@ -55,18 +90,22 @@ def parse_args():
 ARGS = parse_args()
 KID = "mock-kid"
 
+
 # ---------------------------
 # TIME HELPERS (RFC7519)
 # ---------------------------
 def now_utc() -> datetime:
     return datetime.now(timezone.utc)
 
+
 def now_ts() -> int:
     # NumericDate per RFC7519: seconds since epoch
     return int(now_utc().timestamp())
 
+
 def ts_plus(seconds: int) -> int:
     return int((now_utc() + timedelta(seconds=seconds)).timestamp())
+
 
 # ---------------------------
 # KEY MATERIAL
@@ -74,12 +113,14 @@ def ts_plus(seconds: int) -> int:
 def generate_rsa_keypair():
     return rsa.generate_private_key(public_exponent=65537, key_size=2048)
 
+
 def pem_bytes_private(key):
     return key.private_bytes(
         encoding=serialization.Encoding.PEM,
         format=serialization.PrivateFormat.TraditionalOpenSSL,
         encryption_algorithm=serialization.NoEncryption(),
     )
+
 
 def pem_bytes_public_cert_from_key(key, cn="MockOIDC Signing"):
     subject = issuer = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, cn)])
@@ -92,15 +133,23 @@ def pem_bytes_public_cert_from_key(key, cn="MockOIDC Signing"):
         .not_valid_before(datetime.utcnow() - timedelta(minutes=1))
         .not_valid_after(datetime.utcnow() + timedelta(days=365))
         .add_extension(x509.BasicConstraints(ca=True, path_length=None), critical=True)
-        .add_extension(x509.SubjectKeyIdentifier.from_public_key(key.public_key()), critical=False)
-        .add_extension(x509.AuthorityKeyIdentifier.from_issuer_public_key(key.public_key()), critical=False)
+        .add_extension(
+            x509.SubjectKeyIdentifier.from_public_key(key.public_key()), critical=False
+        )
+        .add_extension(
+            x509.AuthorityKeyIdentifier.from_issuer_public_key(key.public_key()),
+            critical=False,
+        )
         .sign(private_key=key, algorithm=hashes.SHA256())
     )
     return cert.public_bytes(serialization.Encoding.PEM)
 
+
 def generate_self_signed_service_cert():
     key = generate_rsa_keypair()
-    subject = issuer = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "MockOIDC Service")])
+    subject = issuer = x509.Name(
+        [x509.NameAttribute(NameOID.COMMON_NAME, "MockOIDC Service")]
+    )
     cert = (
         x509.CertificateBuilder()
         .subject_name(subject)
@@ -110,30 +159,43 @@ def generate_self_signed_service_cert():
         .not_valid_before(datetime.utcnow() - timedelta(minutes=1))
         .not_valid_after(datetime.utcnow() + timedelta(days=365))
         .add_extension(x509.BasicConstraints(ca=True, path_length=None), critical=True)
-        .add_extension(x509.SubjectKeyIdentifier.from_public_key(key.public_key()), critical=False)
-        .add_extension(x509.AuthorityKeyIdentifier.from_issuer_public_key(key.public_key()), critical=False)
+        .add_extension(
+            x509.SubjectKeyIdentifier.from_public_key(key.public_key()), critical=False
+        )
+        .add_extension(
+            x509.AuthorityKeyIdentifier.from_issuer_public_key(key.public_key()),
+            critical=False,
+        )
         .sign(private_key=key, algorithm=hashes.SHA256())
     )
     cert_pem = cert.public_bytes(serialization.Encoding.PEM)
     key_pem = pem_bytes_private(key)
     return cert_pem, key_pem
 
+
 # Token signing keypair
 if ARGS.ssl_quickboot:
     SIGNING_PRIV_KEY = generate_rsa_keypair()
     SIGNING_PRIV_PEM = pem_bytes_private(SIGNING_PRIV_KEY)
-    SIGNING_CERT_PEM = pem_bytes_public_cert_from_key(SIGNING_PRIV_KEY, cn="MockOIDC Signing (Ephemeral)")
+    SIGNING_CERT_PEM = pem_bytes_public_cert_from_key(
+        SIGNING_PRIV_KEY, cn="MockOIDC Signing (Ephemeral)"
+    )
 elif ARGS.cert and ARGS.key:
     with open(ARGS.key, "rb") as f:
         SIGNING_PRIV_PEM = f.read()
-    SIGNING_PRIV_KEY = serialization.load_pem_private_key(SIGNING_PRIV_PEM, password=None)
+    SIGNING_PRIV_KEY = serialization.load_pem_private_key(
+        SIGNING_PRIV_PEM, password=None
+    )
     with open(ARGS.cert, "rb") as f:
         SIGNING_CERT_PEM = f.read()
 else:
     # Default to self-signed signing cert if nothing provided
     SIGNING_PRIV_KEY = generate_rsa_keypair()
     SIGNING_PRIV_PEM = pem_bytes_private(SIGNING_PRIV_KEY)
-    SIGNING_CERT_PEM = pem_bytes_public_cert_from_key(SIGNING_PRIV_KEY, cn="MockOIDC Signing (Default)")
+    SIGNING_CERT_PEM = pem_bytes_public_cert_from_key(
+        SIGNING_PRIV_KEY, cn="MockOIDC Signing (Default)"
+    )
+
 
 def load_public_key_from_cert_or_key(pem_bytes: bytes):
     """
@@ -148,6 +210,7 @@ def load_public_key_from_cert_or_key(pem_bytes: bytes):
         # Not a cert; try as a public key
         return serialization.load_pem_public_key(pem_bytes)
 
+
 PUBLIC_KEY = load_public_key_from_cert_or_key(SIGNING_CERT_PEM)
 
 # Service SSL (HTTPS)
@@ -158,8 +221,12 @@ if ARGS.ssl_quickboot:
     svc_cert_pem, svc_key_pem = generate_self_signed_service_cert()
     cf = tempfile.NamedTemporaryFile(delete=False)
     kf = tempfile.NamedTemporaryFile(delete=False)
-    cf.write(svc_cert_pem); cf.flush(); cf.close()
-    kf.write(svc_key_pem);  kf.flush(); kf.close()
+    cf.write(svc_cert_pem)
+    cf.flush()
+    cf.close()
+    kf.write(svc_key_pem)
+    kf.flush()
+    kf.close()
     TEMP_SERVICE_CERT_FILE = cf.name
     TEMP_SERVICE_KEY_FILE = kf.name
 elif ARGS.ssl_cert and ARGS.ssl_key:
@@ -180,6 +247,7 @@ AUTH_CODES = {}
 # jti -> { client_id, scope, exp (datetime) }
 REFRESH_JTIS = {}
 
+
 # ---------------------------
 # HELPERS
 # ---------------------------
@@ -187,15 +255,18 @@ def base64url_uint(n: int) -> str:
     b = n.to_bytes((n.bit_length() + 7) // 8, byteorder="big")
     return base64.urlsafe_b64encode(b).decode("ascii").rstrip("=")
 
+
 def current_issuer():
     if ARGS.issuer:
         return ARGS.issuer.rstrip("/")
     scheme = "https" if request.is_secure else "http"
     return f"{scheme}://{request.host}"
 
+
 def sign_jwt(claims: dict) -> str:
     headers = {"kid": KID, "alg": "RS256", "typ": "JWT"}
     return jwt.encode(claims, SIGNING_PRIV_PEM, algorithm="RS256", headers=headers)
+
 
 def issue_tokens(client_id: str, scope: str, nonce: str = None):
     sub = secrets.token_hex(16)
@@ -253,6 +324,7 @@ def issue_tokens(client_id: str, scope: str, nonce: str = None):
         "scope": scope,
     }
 
+
 # ---------------------------
 # VIEWS
 # ---------------------------
@@ -274,6 +346,7 @@ LOGIN_HTML = """<!DOCTYPE html>
 </html>
 """
 
+
 # ---------------------------
 # ROUTES
 # ---------------------------
@@ -289,6 +362,7 @@ def authorize_get():
         state=request.args.get("state", ""),
         nonce=request.args.get("nonce", ""),
     )
+
 
 @app.route("/authorize", methods=["POST"])
 def authorize_post():
@@ -313,8 +387,11 @@ def authorize_post():
     if st:
         q["state"] = st
     new_query = urlencode(q)
-    redir = urlunparse((ru.scheme, ru.netloc, ru.path, ru.params, new_query, ru.fragment))
+    redir = urlunparse(
+        (ru.scheme, ru.netloc, ru.path, ru.params, new_query, ru.fragment)
+    )
     return redirect(redir, code=302)
+
 
 @app.route("/token", methods=["POST"])
 def token():
@@ -375,18 +452,22 @@ def token():
     else:
         return jsonify(error="unsupported_grant_type"), 400
 
+
 @app.route("/.well-known/openid-configuration", methods=["GET"])
 def well_known():
     iss = ARGS.issuer.rstrip("/") if ARGS.issuer else current_issuer()
-    return jsonify({
-        "issuer": iss,
-        "authorization_endpoint": f"{iss}/authorize",
-        "token_endpoint": f"{iss}/token",
-        "jwks_uri": f"{iss}/jwks.json",
-        "response_types_supported": ["code"],
-        "grant_types_supported": ["authorization_code", "refresh_token"],
-        "id_token_signing_alg_values_supported": ["RS256"],
-    })
+    return jsonify(
+        {
+            "issuer": iss,
+            "authorization_endpoint": f"{iss}/authorize",
+            "token_endpoint": f"{iss}/token",
+            "jwks_uri": f"{iss}/jwks.json",
+            "response_types_supported": ["code"],
+            "grant_types_supported": ["authorization_code", "refresh_token"],
+            "id_token_signing_alg_values_supported": ["RS256"],
+        }
+    )
+
 
 @app.route("/jwks.json", methods=["GET"])
 def jwks():
@@ -394,16 +475,14 @@ def jwks():
     numbers = pub.public_numbers()
     n = base64url_uint(numbers.n)
     e = base64url_uint(numbers.e)
-    return jsonify({
-        "keys": [{
-            "kty": "RSA",
-            "use": "sig",
-            "kid": KID,
-            "alg": "RS256",
-            "n": n,
-            "e": e
-        }]
-    })
+    return jsonify(
+        {
+            "keys": [
+                {"kty": "RSA", "use": "sig", "kid": KID, "alg": "RS256", "n": n, "e": e}
+            ]
+        }
+    )
+
 
 # ---------------------------
 # MAIN
@@ -422,6 +501,7 @@ def main():
                     os.remove(f)
                 except Exception:
                     pass
+
 
 if __name__ == "__main__":
     main()
