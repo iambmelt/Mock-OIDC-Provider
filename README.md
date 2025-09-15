@@ -1,7 +1,7 @@
 # Mock OIDC Identity Provider (Python, Flask)
 
 This project provides a that implements a mock OpenID Connect (OIDC) Identity Provider.
-It is designed for **testing OIDC client integrations** and supports the **Authorization Code Flow**, **Refresh Tokens**, and optional **PKCE**.
+It is designed for testing OIDC client integrations and supports the Authorization Code Flow, token refresh, and optional PKCE.
 
 ---
 
