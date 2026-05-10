@@ -13,7 +13,7 @@ from flask import Flask, g, jsonify, make_response, redirect, render_template, r
 from mock_oidc.config import AppConfig
 from mock_oidc.crypto import jwks_dict, load_public_key_from_cert_or_key
 from mock_oidc.store import TokenStore
-from mock_oidc.tokens import issue_tokens, now_utc, validate_pkce
+from mock_oidc.tokens import issue_tokens, now_utc, validate_pkce, sign_jwt, now_ts, ts_plus
 
 
 def create_app(config: AppConfig) -> Flask:
@@ -164,6 +164,11 @@ def create_app(config: AppConfig) -> Flask:
         if not username or not password:
             return make_response("Missing username/password", 400)
 
+        # Simple password validation: accept "pw" for any user
+        # This is sufficient for a mock OIDC provider
+        if password != "pw":
+            return make_response("Invalid credentials", 401)
+
         # Validate required parameters
         redirect_uri = request.form.get("redirect_uri")
         if not redirect_uri:
@@ -282,6 +287,17 @@ def create_app(config: AppConfig) -> Flask:
                     client_id=provided_client_id,
                 )
                 return oauth_error("invalid_grant", "Authorization code has expired.")
+
+            # For public clients, client_id is required per RFC 6749 Section 4.1.3
+            if not provided_client_id and not is_confidential:
+                log.warning(
+                    "token_error",
+                    grant_type=grant_type,
+                    error="invalid_request",
+                    detail="missing_client_id",
+                    client_id=provided_client_id,
+                )
+                return oauth_error("invalid_request", "client_id required for public clients.", 400)
 
             client_id = provided_client_id or data["client_id"]
             if provided_client_id and provided_client_id != data["client_id"]:
@@ -496,6 +512,17 @@ def create_app(config: AppConfig) -> Flask:
                 )
                 return oauth_error("invalid_grant", "Refresh token has expired.")
 
+            # For public clients, client_id is required per RFC 6749 Section 6
+            if not provided_client_id and not is_confidential:
+                log.warning(
+                    "token_error",
+                    grant_type=grant_type,
+                    error="invalid_request",
+                    detail="missing_client_id",
+                    client_id=provided_client_id,
+                )
+                return oauth_error("invalid_request", "client_id required for public clients.", 400)
+
             client_id = provided_client_id or entry["client_id"]
             if provided_client_id and provided_client_id != entry["client_id"]:
                 log.warning(
@@ -609,15 +636,21 @@ def create_app(config: AppConfig) -> Flask:
                 )
                 return oauth_error("invalid_request", "scope is required for client_credentials.")
 
-            # Per RFC 6749 Section 4.4.3, sub equals client_id
-            tokens = issue_tokens(
-                client_id=provided_client_id,
-                scope=scope,
-                sub=provided_client_id,
-                iss=current_issuer(),
-                store=store,
-                config=config,
-            )
+            # RFC 6749 Section 4.4.3: For client_credentials, only access_token is issued
+            # sub equals client_id per spec
+            iat = now_ts()
+            access_jti = secrets.token_hex(16)
+            access_claims = {
+                "sub": provided_client_id,
+                "iss": current_issuer(),
+                "aud": provided_client_id,
+                "iat": iat,
+                "nbf": iat,
+                "exp": ts_plus(config.access_token_ttl),
+                "scope": scope,
+                "jti": access_jti,
+            }
+            access_token = sign_jwt(access_claims, config)
 
             store.record_audit(
                 "token_issued",
@@ -635,7 +668,13 @@ def create_app(config: AppConfig) -> Flask:
                 sub=provided_client_id,
             )
 
-            return jsonify(tokens), 200
+            response = {
+                "access_token": access_token,
+                "token_type": "Bearer",
+                "expires_in": config.access_token_ttl,
+                "scope": scope,
+            }
+            return jsonify(response), 200
 
         else:
             log.warning(

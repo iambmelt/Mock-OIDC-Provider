@@ -260,7 +260,7 @@ class TestIDTokenClaims:
         """
         client_id = "test-client-123"
         code, _ = do_authorize(client, client_id=client_id)
-        resp = exchange_code(client, code)
+        resp = exchange_code(client, code, client_id=client_id)
         id_token = resp.get_json()["id_token"]
         claims = decode_jwt(id_token)
 
