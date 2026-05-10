@@ -415,33 +415,37 @@ Single-use refresh token with rotation. Claims:
 
 ---
 
-## Project Maturity
+## Project Status
 
 **Phases Implemented:**
-- ✅ **Phase 1 (Foundation):** Package structure, testability, no side effects on import
-- ✅ **Phase 2 (Correctness):** Stable `sub`, `/userinfo`, `at_hash`, proper PKCE, redirect_uri validation
-- ✅ **Phase 3 (Capability):** `/introspect`, `/revoke`, `client_credentials`, user config, client config
-- ✅ **Phase 4 (Robustness):** Thread-safe TokenStore, TTL eviction, structured logging, request IDs
-- 🚧 **Phase 5+ (Testing, Deployment, Observability):** In progress
+- Phase 1 (Foundation): Package structure, testability, no side effects on import
+- Phase 2 (Correctness): Stable `sub`, `/userinfo`, `at_hash`, proper PKCE, redirect_uri validation
+- Phase 3 (Capability): `/introspect`, `/revoke`, `client_credentials`, user config, client config
+- Phase 4 (Robustness): Thread-safe TokenStore, TTL eviction, structured logging, request IDs
+- Phase 5 (Testing): Full test suite with comprehensive coverage
+- Phase 6 (Deployment): Docker support, GitHub Actions CI/CD, automated publishing
+- Phase 7 (Observability): In-memory audit log, admin endpoints
 
 **Test Coverage:** 110+ tests across all major flows and edge cases
 
-### Limitations
+## Use Cases
 
-* **Not production-ready** — for local testing and development only
-* **No real user database** — uses in-memory store with optional JSON config
-* **No persistent storage** — tokens and codes are lost on restart
-* **No client registration** — any client_id is accepted (unless --clients config is provided)
-* **Ephemeral keys by default** — signing keys are generated on each restart (provide --cert/--key to persist)
+This mock OIDC provider is ideal for:
 
-### Perfect For
+- Integration testing of OIDC/OAuth2 clients and applications
+- Learning and understanding OIDC/OAuth2 concepts
+- Debugging authentication and authorization flows
+- Testing mobile application integrations with identity providers
+- Rapid prototyping of features that require authentication
 
-- 🧪 Integration testing OIDC/OAuth2 clients
-- 📚 Learning OIDC/OAuth2 concepts
-- 🔍 Debugging authentication flows
-- 📱 Testing mobile app integrations
-- 🚀 Rapid prototyping of auth-dependent features
+## Limitations
+
+- Not intended for production use; designed for local testing and development only
+- No real user database; uses in-memory store with optional JSON configuration
+- No persistent storage; tokens and codes are lost on server restart
+- Client registration is not enforced; any client_id is accepted unless `--clients` config is provided
+- Signing keys are generated on each restart by default; provide `--cert` and `--key` flags to persist keys
 
 ## Contributing
 
-This is an educational/development tool. Issues and improvements welcome!
+This is an educational and development tool. Bug reports and feature suggestions are welcome.
