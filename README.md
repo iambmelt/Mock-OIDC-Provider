@@ -1,3 +1,5 @@
+[![CI](https://github.com/iambmelt/Mock-OIDC-Provider/actions/workflows/ci.yml/badge.svg)](https://github.com/iambmelt/Mock-OIDC-Provider/actions/workflows/ci.yml)
+
 # Mock OIDC Identity Provider (Python, Flask)
 
 A feature-rich, spec-compliant mock OpenID Connect (OIDC) / OAuth2 Identity Provider for testing client integrations.
