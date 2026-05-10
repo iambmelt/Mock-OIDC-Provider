@@ -1,6 +1,5 @@
 """Tests for OIDC UserInfo endpoint (Phase 2.2)."""
 
-import pytest
 from tests.conftest import do_authorize, exchange_code, decode_jwt
 
 

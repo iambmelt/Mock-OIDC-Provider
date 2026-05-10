@@ -4,7 +4,7 @@ Tests verify thread safety and concurrent access patterns.
 """
 
 import threading
-from tests.conftest import do_authorize, exchange_code, decode_jwt
+from tests.conftest import do_authorize, exchange_code
 
 
 class TestConcurrentAuthorization:
@@ -292,7 +292,6 @@ class TestStoreCountsUnderConcurrency:
 
     def test_store_code_count_accurate_concurrent(self, client):
         """Test store code count is accurate with concurrent operations."""
-        from mock_oidc.provider import create_app
 
         # Use app config to access store
         app = client.application
@@ -320,7 +319,6 @@ class TestStoreCountsUnderConcurrency:
 
     def test_store_refresh_count_accurate_concurrent(self, client):
         """Test store refresh token count is accurate with concurrent ops."""
-        from mock_oidc.provider import create_app
 
         app = client.application
         store = app.config["MOCK_OIDC_STORE"]
@@ -361,7 +359,7 @@ class TestMixedConcurrentOperations:
                 resp = exchange_code(client, code)
                 with lock:
                     results.append(resp.status_code)
-            except Exception as e:
+            except Exception:
                 with lock:
                     results.append(None)
 
@@ -395,7 +393,7 @@ class TestMixedConcurrentOperations:
                 )
                 with lock:
                     results.append((resp1.status_code, resp2.status_code))
-            except Exception as e:
+            except Exception:
                 with lock:
                     results.append((None, None))
 

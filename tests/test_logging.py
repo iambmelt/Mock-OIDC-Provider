@@ -1,8 +1,5 @@
 """Tests for structured logging and request ID middleware."""
 
-import time
-from unittest.mock import patch
-import pytest
 from mock_oidc.config import AppConfig
 from mock_oidc.crypto import setup_signing_keys
 from mock_oidc.provider import create_app
@@ -82,14 +79,13 @@ class TestEvictionThread:
 
     def test_eviction_logging(self):
         """Test that eviction events are logged."""
-        from datetime import datetime, timedelta, timezone
+        from datetime import timedelta
         from mock_oidc.tokens import now_utc
 
         config = AppConfig(eviction_interval=1)
         setup_signing_keys(config)
         app = create_app(config)
         app.config["TESTING"] = True
-        client = app.test_client()
         store = app.config["MOCK_OIDC_STORE"]
 
         # Add some tokens that will expire

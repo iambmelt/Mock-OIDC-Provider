@@ -4,7 +4,6 @@ import pytest
 from tests.conftest import (
     do_authorize,
     exchange_code,
-    decode_jwt,
 )
 
 
@@ -180,7 +179,6 @@ class TestAuditLogEndpoint:
         resp = client.get("/admin/audit?limit=1000")
         data = resp.get_json()
         total = data["total_in_store"]
-        count = data["count"]
 
         # Get limited
         resp = client.get("/admin/audit?limit=2")

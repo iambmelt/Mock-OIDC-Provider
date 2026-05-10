@@ -12,7 +12,6 @@ from tests.conftest import (
     decode_jwt,
     assert_jwt_has_claims,
     assert_timestamp_ordering,
-    get_claim_value,
 )
 
 
@@ -29,7 +28,7 @@ class TestAccessTokenClaims:
         access_token = resp.get_json()["access_token"]
 
         required_claims = ["sub", "iss", "aud", "iat", "exp", "nbf", "scope", "jti"]
-        claims = assert_jwt_has_claims(access_token, required_claims)
+        assert_jwt_has_claims(access_token, required_claims)
 
     def test_access_token_sub_format(self, client):
         """Verify sub claim is non-empty string."""
@@ -170,7 +169,7 @@ class TestIDTokenClaims:
         id_token = resp.get_json()["id_token"]
 
         required_claims = ["sub", "iss", "aud", "iat", "exp", "nbf"]
-        claims = assert_jwt_has_claims(id_token, required_claims)
+        assert_jwt_has_claims(id_token, required_claims)
 
     def test_id_token_has_at_hash(self, client):
         """Verify at_hash claim is present when access token issued.
@@ -303,7 +302,7 @@ class TestRefreshTokenClaims:
         refresh_token = resp.get_json()["refresh_token"]
 
         required_claims = ["sub", "iss", "aud", "iat", "exp", "nbf", "jti", "typ"]
-        claims = assert_jwt_has_claims(refresh_token, required_claims)
+        assert_jwt_has_claims(refresh_token, required_claims)
 
     def test_refresh_token_typ_is_refresh(self, client):
         """Verify refresh token has typ=refresh."""

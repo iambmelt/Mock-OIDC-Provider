@@ -6,7 +6,6 @@ Tests verify refresh token implementation per RFC 6749 and OIDC Core specs:
 """
 
 import threading
-import time
 from tests.conftest import (
     do_authorize,
     exchange_code,
@@ -391,7 +390,7 @@ class TestRefreshClientId:
         resp1 = exchange_code(client, code, client_id="client-1")
         refresh_token = resp1.get_json()["refresh_token"]
 
-        # Try to use with different client
+        # Try to use with different client — must be rejected
         resp2 = client.post(
             "/token",
             data={
@@ -400,8 +399,8 @@ class TestRefreshClientId:
                 "client_id": "client-2",  # Different client
             },
         )
-        # Should fail or be tied to original client
-        # Implementation may vary
+        assert resp2.status_code == 400
+        assert resp2.get_json()["error"] == "invalid_grant"
 
 
 class TestRefreshTokenClaims:

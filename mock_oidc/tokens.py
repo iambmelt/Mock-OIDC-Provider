@@ -1,4 +1,3 @@
-import hashlib
 import secrets
 from datetime import datetime, timedelta, timezone
 
@@ -108,7 +107,7 @@ def issue_tokens(
         "access_token": access_token,
         "id_token": sign_jwt(id_claims, config),
         "refresh_token": sign_jwt(refresh_claims, config),
-        "token_type": "Bearer",
+        "token_type": "Bearer",  # nosec B105 - OAuth2 token type, not a password
         "expires_in": config.access_token_ttl,
         "scope": scope,
     }

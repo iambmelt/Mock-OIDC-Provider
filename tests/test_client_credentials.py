@@ -1,8 +1,5 @@
 """Tests for client_credentials grant type."""
 
-import pytest
-import jwt as pyjwt
-
 from tests.conftest import decode_jwt
 
 

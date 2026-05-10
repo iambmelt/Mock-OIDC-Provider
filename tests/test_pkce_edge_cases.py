@@ -300,14 +300,24 @@ class TestPKCEEdgeCases:
     """Test edge cases in PKCE handling."""
 
     def test_pkce_verifier_with_spaces_invalid(self, client):
-        """Test PKCE verifier with spaces is invalid.
+        """Test that a verifier with spaces fails (hash mismatch against a valid challenge).
 
-        RFC 7636: Only unreserved characters allowed.
+        RFC 7636: Only unreserved characters are valid. A spaces verifier won't
+        match a challenge derived from a standard verifier, so it is rejected.
         """
-        # This test is for invalid input - spaces not allowed
-        verifier = "a a b b c c d d e e f f g g h h i i j j k k"
-        # Space is not unreserved, so this is malformed
-        # Server might reject during validation
+        valid_verifier = "a" * 43
+        digest = hashlib.sha256(valid_verifier.encode("utf-8")).digest()
+        challenge = base64url_no_pad(digest)
+
+        code, _ = do_authorize(
+            client,
+            code_challenge=challenge,
+            code_challenge_method="S256",
+        )
+        spaces_verifier = "a a b b c c d d e e f f g g h h i i j j k k"
+        resp = exchange_code(client, code, code_verifier=spaces_verifier)
+        assert resp.status_code == 400
+        assert resp.get_json()["error"] == "invalid_grant"
 
     def test_pkce_challenge_transformation_consistent(self, client):
         """Test S256 transformation is consistent.
@@ -340,21 +350,8 @@ class TestPKCEEdgeCases:
         assert challenge1 != challenge2
 
     def test_pkce_empty_verifier_invalid(self, client):
-        """Test empty verifier is invalid."""
-        # Empty string doesn't meet minimum length
-        verifier = ""
-        # This should fail in authorization
-        if verifier:
-            digest = hashlib.sha256(verifier.encode("utf-8")).digest()
-            challenge = base64url_no_pad(digest)
-        # Most implementations would reject this
-
-    def test_pkce_verifier_too_short_invalid(self, client):
-        """Test verifier shorter than 43 chars is invalid.
-
-        RFC 7636 Section 4.1: Minimum is 43 characters.
-        """
-        verifier = "a" * 42  # Too short
+        """Test that omitting the verifier when a challenge was registered fails."""
+        verifier = "a" * 43
         digest = hashlib.sha256(verifier.encode("utf-8")).digest()
         challenge = base64url_no_pad(digest)
 
@@ -363,13 +360,31 @@ class TestPKCEEdgeCases:
             code_challenge=challenge,
             code_challenge_method="S256",
         )
+        # No code_verifier sent — server must reject
+        resp = exchange_code(client, code)
+        assert resp.status_code == 400
+        assert resp.get_json()["error"] in ("invalid_grant", "invalid_request")
 
-        # Short verifier might be rejected or accepted depending on server
-        resp = exchange_code(client, code, code_verifier=verifier)
-        # Just verify the error structure if it fails
-        if resp.status_code == 400:
-            data = resp.get_json()
-            assert "error" in data
+    def test_pkce_verifier_too_short_wrong_hash(self, client):
+        """Test that a short verifier fails when the challenge doesn't match.
+
+        The mock server validates hash equality, not verifier length. A wrong
+        verifier (short or otherwise) is rejected via hash mismatch.
+        """
+        valid_verifier = "a" * 43
+        digest = hashlib.sha256(valid_verifier.encode("utf-8")).digest()
+        challenge = base64url_no_pad(digest)
+
+        code, _ = do_authorize(
+            client,
+            code_challenge=challenge,
+            code_challenge_method="S256",
+        )
+
+        short_verifier = "a" * 42
+        resp = exchange_code(client, code, code_verifier=short_verifier)
+        assert resp.status_code == 400
+        assert resp.get_json()["error"] == "invalid_grant"
 
     def test_pkce_verifier_too_long_invalid(self, client):
         """Test verifier longer than 128 chars is invalid.

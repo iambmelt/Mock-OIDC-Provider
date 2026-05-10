@@ -1,9 +1,7 @@
 """Integration tests for Phase 4 implementation."""
 
-import time
 import threading
-from datetime import datetime, timedelta, timezone
-import pytest
+from datetime import timedelta
 from mock_oidc.config import AppConfig
 from mock_oidc.crypto import setup_signing_keys
 from mock_oidc.provider import create_app
@@ -91,7 +89,6 @@ class TestPhase4Integration:
 
     def test_ttl_eviction_disabled_in_tests(self):
         """Verify eviction is disabled (interval=0) in default test config."""
-        from tests.conftest import base_config
 
         # The base_config fixture sets eviction_interval=0
         config = AppConfig(eviction_interval=0)

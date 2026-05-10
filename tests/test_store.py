@@ -1,8 +1,7 @@
 """Tests for TokenStore thread safety and expiration handling."""
 
-import pytest
 import threading
-from datetime import datetime, timedelta, timezone
+from datetime import timedelta
 
 from mock_oidc.store import TokenStore
 from mock_oidc.tokens import now_utc

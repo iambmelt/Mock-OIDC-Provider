@@ -254,7 +254,6 @@ def test_token_redirect_uri_match_succeeds(client):
 def test_token_pkce_code_challenge_stored(client):
     """Test that code_challenge is stored regardless of PKCE config."""
     import hashlib
-    import base64
     from mock_oidc.crypto import base64url_no_pad
 
     verifier = "a" * 43

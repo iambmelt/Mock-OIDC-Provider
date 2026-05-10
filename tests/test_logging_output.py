@@ -3,9 +3,6 @@
 Tests verify structlog text and JSON format handling and no sensitive data leaks.
 """
 
-import json
-import logging
-from io import StringIO
 from mock_oidc.config import AppConfig
 from mock_oidc.crypto import setup_signing_keys
 from mock_oidc.provider import create_app
@@ -86,8 +83,6 @@ class TestLoggingFormatJSON:
     def test_json_logging_format_valid(self):
         """Test JSON log output is valid JSON."""
         # Capture logging output
-        import io
-        import sys
 
         config = AppConfig(log_format="json", eviction_interval=0)
         setup_signing_keys(config)
@@ -212,7 +207,6 @@ class TestLoggingWithRequestID:
 
     def test_request_id_in_context(self):
         """Test request ID is in logging context."""
-        import structlog
 
         config = AppConfig(log_format="text", eviction_interval=0)
         setup_signing_keys(config)

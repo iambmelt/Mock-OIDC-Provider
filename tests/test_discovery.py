@@ -4,8 +4,6 @@ Tests verify all required and optional fields per OpenID Connect Core 1.0 spec:
 https://openid.net/specs/openid-connect-discovery-1_0.html
 """
 
-import re
-
 
 class TestDiscoveryRequired:
     """Test required discovery document fields per OIDC Core."""

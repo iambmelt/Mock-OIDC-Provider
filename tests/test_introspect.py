@@ -1,9 +1,6 @@
 """Tests for /introspect endpoint (RFC 7662)."""
 
-import pytest
-from datetime import datetime, timedelta, timezone
-
-from tests.conftest import do_authorize, exchange_code, decode_jwt
+from tests.conftest import do_authorize, exchange_code
 
 
 class TestIntrospectBasic:

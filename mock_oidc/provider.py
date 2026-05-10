@@ -143,11 +143,15 @@ def create_app(config: AppConfig) -> Flask:
         if form_client_id:
             return {
                 "client_id": form_client_id,
-                "client_secret": None,
+                "client_secret": None,  # nosec B105 - no secret provided (public client)
                 "method": "none",
             }
 
-        return {"client_id": None, "client_secret": None, "method": "none"}
+        return {
+            "client_id": None,
+            "client_secret": None,  # nosec B105 - absent, not hardcoded
+            "method": "none",
+        }
 
     @app.route("/health", methods=["GET"])
     def health():
@@ -693,7 +697,7 @@ def create_app(config: AppConfig) -> Flask:
 
             response = {
                 "access_token": access_token,
-                "token_type": "Bearer",
+                "token_type": "Bearer",  # nosec B105 - OAuth2 token type, not a password
                 "expires_in": config.access_token_ttl,
                 "scope": scope,
             }
@@ -884,7 +888,6 @@ def create_app(config: AppConfig) -> Flask:
             return oauth_error(code, desc, 401)
 
         client_id = auth.get("client_id")
-        client_secret = auth.get("client_secret")
 
         if not client_id:
             log.warning("introspect_error", error="missing_client_id")
@@ -916,7 +919,7 @@ def create_app(config: AppConfig) -> Flask:
             "client_id": claims.get("aud"),
             "exp": claims.get("exp"),
             "iat": claims.get("iat"),
-            "token_type": "Bearer",
+            "token_type": "Bearer",  # nosec B105 - OAuth2 token type, not a password
             "jti": claims.get("jti"),
         }
 
