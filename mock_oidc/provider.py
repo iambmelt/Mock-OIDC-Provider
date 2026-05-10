@@ -201,6 +201,14 @@ def create_app(config: AppConfig) -> Flask:
         store.put_code(code, entry)
 
         # Log authorization code issuance
+        store.record_audit(
+            "authorize_code_issued",
+            request_id=g.request_id,
+            client_id=client_id,
+            username=username,
+            scope=scope,
+            pkce_method=pkce_method,
+        )
         log.info(
             "authorize_code_issued",
             sub=sub,
@@ -345,20 +353,6 @@ def create_app(config: AppConfig) -> Flask:
 
             scope = request.form.get("scope") or data["scope"]
 
-            # Gather user claims if users config is loaded
-            user_claims = None
-            if config.users and data.get("username") in config.users:
-                user_data = config.users[data["username"]]
-                user_claims = {}
-                if "name" in user_data:
-                    user_claims["name"] = user_data["name"]
-                if "email" in user_data:
-                    user_claims["email"] = user_data["email"]
-                # Include any other custom claims (groups, department, etc.)
-                for key, val in user_data.items():
-                    if key not in ("name", "email", "secret", "redirect_uris", "allowed_grants", "allowed_scopes"):
-                        user_claims[key] = val
-
             tokens = issue_tokens(
                 client_id=client_id,
                 scope=scope,
@@ -367,7 +361,6 @@ def create_app(config: AppConfig) -> Flask:
                 store=store,
                 config=config,
                 nonce=data.get("nonce"),
-                user_claims=user_claims,
             )
 
             # Log successful token issuance
@@ -384,6 +377,21 @@ def create_app(config: AppConfig) -> Flask:
             except Exception:
                 sub = "unknown"
 
+            store.record_audit(
+                "code_exchanged",
+                request_id=g.request_id,
+                client_id=client_id,
+                grant_type="authorization_code",
+                scope=scope,
+            )
+            store.record_audit(
+                "token_issued",
+                request_id=g.request_id,
+                grant_type=grant_type,
+                client_id=client_id,
+                scope=scope,
+                sub=sub,
+            )
             log.info(
                 "token_issued",
                 grant_type=grant_type,
@@ -500,7 +508,6 @@ def create_app(config: AppConfig) -> Flask:
                 iss=current_issuer(),
                 store=store,
                 config=config,
-                user_claims=None,
             )
 
             # Log successful token issuance from refresh
@@ -517,6 +524,22 @@ def create_app(config: AppConfig) -> Flask:
             except Exception:
                 sub = "unknown"
 
+            store.record_audit(
+                "token_refreshed",
+                request_id=g.request_id,
+                client_id=client_id,
+                old_sub=entry["sub"],
+                new_sub=sub,
+                scope=scope,
+            )
+            store.record_audit(
+                "token_issued",
+                request_id=g.request_id,
+                grant_type=grant_type,
+                client_id=client_id,
+                scope=scope,
+                sub=sub,
+            )
             log.info(
                 "token_issued",
                 grant_type=grant_type,
@@ -561,9 +584,16 @@ def create_app(config: AppConfig) -> Flask:
                 iss=current_issuer(),
                 store=store,
                 config=config,
-                only_access=True,
             )
 
+            store.record_audit(
+                "token_issued",
+                request_id=g.request_id,
+                grant_type=grant_type,
+                client_id=provided_client_id,
+                scope=scope,
+                sub=provided_client_id,
+            )
             log.info(
                 "token_issued",
                 grant_type=grant_type,
@@ -742,6 +772,13 @@ def create_app(config: AppConfig) -> Flask:
             "jti": claims.get("jti"),
         }
 
+        store.record_audit(
+            "token_introspected",
+            request_id=g.request_id,
+            client_id=client_id,
+            active=True,
+            token_sub=response.get("sub"),
+        )
         log.info("introspect_success", client_id=client_id, sub=response.get("sub"))
         return jsonify(response), 200
 
@@ -784,6 +821,12 @@ def create_app(config: AppConfig) -> Flask:
             if jti and token_type_hint != "access_token":
                 # Try to revoke the refresh token
                 was_revoked = store.revoke_refresh(jti)
+                store.record_audit(
+                    "token_revoked",
+                    request_id=g.request_id,
+                    client_id=client_id,
+                    jti=jti,
+                )
                 log.info(
                     "revoke_token",
                     client_id=client_id,
@@ -796,5 +839,51 @@ def create_app(config: AppConfig) -> Flask:
 
         # Always return empty 200 response per RFC 7009
         return "", 200
+
+    @app.route("/admin/audit", methods=["GET"])
+    def admin_audit():
+        """Return audit log with optional filtering.
+
+        Query parameters:
+        - limit: Max events to return (default 100, max 1000)
+        - event: Filter by event type (optional)
+        - client_id: Filter by client_id (optional)
+        """
+        limit = request.args.get("limit", default=100, type=int)
+        event_filter = request.args.get("event", default=None, type=str)
+        client_id_filter = request.args.get("client_id", default=None, type=str)
+
+        total_in_store, entries = store.get_audit_log(
+            limit=limit,
+            event_filter=event_filter,
+            client_id_filter=client_id_filter,
+        )
+
+        return jsonify(
+            {
+                "count": len(entries),
+                "total_in_store": total_in_store,
+                "entries": entries,
+            }
+        ), 200
+
+    @app.route("/admin/store", methods=["GET"])
+    def admin_store():
+        """Return current token store statistics."""
+        counts = store.counts()
+        audit_count = len(store._audit)
+
+        return jsonify(
+            {
+                "codes": counts["codes"],
+                "refresh_tokens": counts["refresh_tokens"],
+                "audit_events": audit_count,
+            }
+        ), 200
+
+    @app.route("/admin/", methods=["GET"])
+    def admin_dashboard():
+        """Serve admin dashboard UI."""
+        return render_template("admin.html")
 
     return app

@@ -109,7 +109,7 @@ pytest tests/ -v          # Run all tests
 pytest tests/ --cov       # With coverage report
 ```
 
-Currently: **110+ tests passing**, covering all major flows and edge cases.
+Currently: **351+ tests passing** with 87% code coverage, covering all major flows, edge cases, and spec compliance.
 
 ## Usage
 
@@ -361,9 +361,143 @@ Response (claims based on access token scope):
 | `/userinfo` | GET, POST | Bearer | Get authenticated user claims |
 | `/introspect` | POST | Client auth | Introspect token validity (RFC 7662) |
 | `/revoke` | POST | Client auth | Revoke refresh token (RFC 7009) |
+| `/health` | GET | — | Health check endpoint with uptime (for Docker/K8s) |
 | `/.well-known/openid-configuration` | GET | — | OIDC discovery document |
 | `/jwks.json` | GET | — | JSON Web Key Set for verification |
 | `/callback` | GET | — | Debug endpoint showing auth code (useful in browser testing) |
+| `/admin/audit` | GET | — | Audit log with optional filtering (Phase 7) |
+| `/admin/store` | GET | — | Token store statistics (Phase 7) |
+| `/admin/` | GET | — | Admin dashboard UI with real-time stats (Phase 7) |
+| `/admin/audit` | GET | — | Audit log with filtering (Phase 7) |
+| `/admin/store` | GET | — | Token store statistics (Phase 7) |
+| `/admin/` | GET | — | Admin dashboard UI (Phase 7) |
+
+---
+
+## Admin Endpoints (Phase 7 - Observability)
+
+The Mock OIDC Provider includes admin endpoints for monitoring and debugging during local testing.
+
+### `/admin/audit` — Audit Log Endpoint
+
+Get audit log entries with optional filtering:
+
+```bash
+# Get recent audit events
+curl http://localhost:4567/admin/audit
+
+# Filter by event type
+curl http://localhost:4567/admin/audit?event=token_issued
+
+# Filter by client_id
+curl http://localhost:4567/admin/audit?client_id=web-app
+
+# Limit results
+curl http://localhost:4567/admin/audit?limit=50
+
+# Combine filters
+curl http://localhost:4567/admin/audit?event=authorize_code_issued&client_id=web-app
+```
+
+Response:
+
+```json
+{
+  "count": 5,
+  "total_in_store": 427,
+  "entries": [
+    {
+      "ts": "2026-05-10T12:34:56.789Z",
+      "event": "token_issued",
+      "request_id": "abc123def456",
+      "client_id": "web-app",
+      "scope": "openid email",
+      "sub": "user:xyz789"
+    },
+    ...
+  ]
+}
+```
+
+**Features:**
+- Returns up to `limit` entries (default 100, max 1000)
+- Filter by `event` type (e.g., `token_issued`, `authorize_code_issued`, `token_refreshed`)
+- Filter by `client_id`
+- Entries sorted by timestamp (most recent first)
+- Stores last 1000 audit events in memory
+
+**Audit Event Types:**
+- `authorize_code_issued` — Authorization code created
+- `code_exchanged` — Auth code exchanged for tokens
+- `token_issued` — Tokens issued (any grant type)
+- `token_refreshed` — Refresh token exchanged
+- `token_revoked` — Refresh token revoked
+- `token_introspected` — Token introspected
+
+### `/admin/store` — Store Statistics Endpoint
+
+Get current token store statistics:
+
+```bash
+curl http://localhost:4567/admin/store
+```
+
+Response:
+
+```json
+{
+  "codes": 3,
+  "refresh_tokens": 5,
+  "audit_events": 427
+}
+```
+
+Shows:
+- Active authorization codes
+- Active refresh tokens
+- Total audit events in store
+
+### `/admin/` — Admin Dashboard UI
+
+Open in a browser to view real-time dashboard:
+
+```
+http://localhost:4567/admin/
+```
+
+Features:
+- Live statistics display (auto-updates every 5 seconds)
+- Audit event table with filtering by event type or client_id
+- Color-coded event badges
+- No authentication required (for local testing only)
+
+### Admin Endpoints (Phase 7)
+
+For local testing and debugging, three admin endpoints provide observability:
+
+**Audit Log:**
+```bash
+curl http://localhost:4567/admin/audit
+curl http://localhost:4567/admin/audit?event=token_issued
+curl http://localhost:4567/admin/audit?client_id=web-app&limit=20
+```
+
+Returns audit events with timestamps, request IDs, and details. Supports filtering by event type and client ID.
+
+**Store Statistics:**
+```bash
+curl http://localhost:4567/admin/store
+```
+
+Returns current counts of active authorization codes, refresh tokens, and audit events.
+
+**Admin Dashboard:**
+```bash
+# Open in browser:
+http://localhost:4567/admin/
+```
+
+Interactive dashboard showing real-time statistics and filterable audit log with auto-refresh every 5 seconds.
 
 ---
 
@@ -426,7 +560,7 @@ Single-use refresh token with rotation. Claims:
 - Phase 6 (Deployment): Docker support, GitHub Actions CI/CD, automated publishing
 - Phase 7 (Observability): In-memory audit log, admin endpoints
 
-**Test Coverage:** 110+ tests across all major flows and edge cases
+**Test Coverage:** 351+ tests across all major flows and edge cases (including 35 Phase 7 admin/audit tests)
 
 ## Use Cases
 

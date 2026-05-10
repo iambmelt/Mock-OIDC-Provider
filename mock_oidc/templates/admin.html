@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Mock OIDC Admin Dashboard</title>
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      padding: 2rem;
+      background: #f5f5f5;
+      margin: 0;
+    }
+
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+      background: white;
+      padding: 2rem;
+      border-radius: 8px;
+      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    }
+
+    h1 {
+      margin-top: 0;
+      color: #333;
+    }
+
+    h2 {
+      color: #555;
+      border-bottom: 2px solid #f0f0f0;
+      padding-bottom: 0.5rem;
+      margin-top: 2rem;
+    }
+
+    .section {
+      margin-bottom: 2rem;
+    }
+
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+      gap: 1rem;
+      margin-bottom: 1.5rem;
+    }
+
+    .stat-box {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      padding: 1.5rem;
+      border-radius: 4px;
+      text-align: center;
+      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    }
+
+    .stat-box.codes {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    }
+
+    .stat-box.tokens {
+      background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+    }
+
+    .stat-box.audit {
+      background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+    }
+
+    .stat-box .number {
+      font-size: 2.5em;
+      font-weight: bold;
+      margin: 0.5rem 0;
+    }
+
+    .stat-box .label {
+      font-size: 0.9em;
+      opacity: 0.9;
+    }
+
+    .filters {
+      display: flex;
+      gap: 1rem;
+      margin-bottom: 1rem;
+      flex-wrap: wrap;
+    }
+
+    .filter-group {
+      display: flex;
+      flex-direction: column;
+      gap: 0.25rem;
+    }
+
+    .filter-group label {
+      font-size: 0.85em;
+      font-weight: 600;
+      color: #666;
+    }
+
+    .filter-group input {
+      padding: 0.5rem;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      font-size: 0.9em;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 1rem;
+    }
+
+    thead {
+      background: #f9f9f9;
+    }
+
+    th {
+      padding: 0.75rem;
+      text-align: left;
+      font-weight: 600;
+      border-bottom: 2px solid #ddd;
+      color: #333;
+    }
+
+    td {
+      padding: 0.75rem;
+      border-bottom: 1px solid #f0f0f0;
+    }
+
+    tbody tr:hover {
+      background: #fafafa;
+    }
+
+    .timestamp {
+      font-family: "Monaco", "Menlo", monospace;
+      font-size: 0.85em;
+      color: #666;
+    }
+
+    .event-badge {
+      display: inline-block;
+      background: #e3f2fd;
+      color: #1976d2;
+      padding: 0.25rem 0.75rem;
+      border-radius: 12px;
+      font-size: 0.85em;
+      font-weight: 500;
+    }
+
+    .client-id {
+      font-family: "Monaco", "Menlo", monospace;
+      font-size: 0.9em;
+    }
+
+    .details {
+      font-family: "Monaco", "Menlo", monospace;
+      font-size: 0.85em;
+      color: #666;
+      max-width: 400px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .no-data {
+      padding: 2rem;
+      text-align: center;
+      color: #999;
+    }
+
+    .last-update {
+      font-size: 0.85em;
+      color: #999;
+      margin-top: 1rem;
+    }
+
+    @media (max-width: 768px) {
+      .container {
+        padding: 1rem;
+      }
+
+      .stats {
+        grid-template-columns: 1fr;
+      }
+
+      .filters {
+        flex-direction: column;
+      }
+
+      table {
+        font-size: 0.9em;
+      }
+
+      th,
+      td {
+        padding: 0.5rem;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Mock OIDC Admin Dashboard</h1>
+
+    <div class="section">
+      <h2>Store Statistics</h2>
+      <div class="stats" id="stats">
+        <div class="stat-box codes">
+          <div class="number" id="codes-count">0</div>
+          <div class="label">Authorization Codes</div>
+        </div>
+        <div class="stat-box tokens">
+          <div class="number" id="tokens-count">0</div>
+          <div class="label">Refresh Tokens</div>
+        </div>
+        <div class="stat-box audit">
+          <div class="number" id="audit-count">0</div>
+          <div class="label">Audit Events</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="section">
+      <h2>Recent Audit Events</h2>
+      <div class="filters">
+        <div class="filter-group">
+          <label>Filter by event:</label>
+          <input type="text" id="filter-event" placeholder="e.g., token_issued" />
+        </div>
+        <div class="filter-group">
+          <label>Filter by client_id:</label>
+          <input type="text" id="filter-client" placeholder="e.g., web-app" />
+        </div>
+      </div>
+      <table id="audit-table">
+        <thead>
+          <tr>
+            <th>Timestamp</th>
+            <th>Event</th>
+            <th>Client ID</th>
+            <th>Subject</th>
+            <th>Details</th>
+          </tr>
+        </thead>
+        <tbody id="audit-body">
+          <tr>
+            <td colspan="5" class="no-data">Loading audit events...</td>
+          </tr>
+        </tbody>
+      </table>
+      <div class="last-update">Last updated: <span id="last-update-time">never</span></div>
+    </div>
+  </div>
+
+  <script>
+    let currentEventFilter = "";
+    let currentClientFilter = "";
+    let allAuditEntries = [];
+
+    function formatTimestamp(ts) {
+      try {
+        const date = new Date(ts);
+        return date.toLocaleString();
+      } catch {
+        return ts;
+      }
+    }
+
+    function updateDashboard() {
+      // Fetch store stats
+      fetch("/admin/store")
+        .then((resp) => resp.json())
+        .then((store) => {
+          document.getElementById("codes-count").textContent = store.codes;
+          document.getElementById("tokens-count").textContent =
+            store.refresh_tokens;
+          document.getElementById("audit-count").textContent =
+            store.audit_events;
+        })
+        .catch((err) => console.error("Error fetching store stats:", err));
+
+      // Fetch audit log
+      let auditUrl = "/admin/audit?limit=100";
+      if (currentEventFilter) {
+        auditUrl += "&event=" + encodeURIComponent(currentEventFilter);
+      }
+      if (currentClientFilter) {
+        auditUrl += "&client_id=" + encodeURIComponent(currentClientFilter);
+      }
+
+      fetch(auditUrl)
+        .then((resp) => resp.json())
+        .then((audit) => {
+          allAuditEntries = audit.entries;
+          renderAuditTable(audit.entries);
+          document.getElementById("last-update-time").textContent =
+            new Date().toLocaleTimeString();
+        })
+        .catch((err) => console.error("Error fetching audit log:", err));
+    }
+
+    function renderAuditTable(entries) {
+      const tbody = document.getElementById("audit-body");
+
+      if (entries.length === 0) {
+        tbody.innerHTML =
+          '<tr><td colspan="5" class="no-data">No audit events found</td></tr>';
+        return;
+      }
+
+      tbody.innerHTML = entries
+        .map(
+          (entry) =>
+            `
+        <tr>
+          <td class="timestamp">${formatTimestamp(entry.ts)}</td>
+          <td><span class="event-badge">${escapeHtml(entry.event)}</span></td>
+          <td class="client-id">${escapeHtml(entry.client_id || "-")}</td>
+          <td class="client-id">${escapeHtml(entry.sub || entry.token_sub || "-")}</td>
+          <td class="details" title="${escapeHtml(JSON.stringify(entry))}">
+            ${escapeHtml(JSON.stringify(entry).substring(0, 50))}...
+          </td>
+        </tr>
+      `
+        )
+        .join("");
+    }
+
+    function escapeHtml(text) {
+      const div = document.createElement("div");
+      div.textContent = text;
+      return div.innerHTML;
+    }
+
+    document.getElementById("filter-event").addEventListener("change", (e) => {
+      currentEventFilter = e.target.value;
+      updateDashboard();
+    });
+
+    document
+      .getElementById("filter-client")
+      .addEventListener("change", (e) => {
+        currentClientFilter = e.target.value;
+        updateDashboard();
+      });
+
+    // Update on load and every 5 seconds
+    updateDashboard();
+    setInterval(updateDashboard, 5000);
+  </script>
+</body>
+</html>

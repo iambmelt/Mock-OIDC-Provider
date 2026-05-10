@@ -1,13 +1,16 @@
 import threading
+from collections import deque
 from datetime import datetime, timezone
+from typing import Optional
 
 
 class TokenStore:
-    """Thread-safe in-memory token store with expiration tracking."""
+    """Thread-safe in-memory token store with expiration tracking and audit logging."""
 
     def __init__(self):
         self._codes: dict = {}
         self._refresh: dict = {}
+        self._audit: deque = deque(maxlen=1000)
         self._lock = threading.Lock()
 
     def put_code(self, code: str, entry: dict) -> None:
@@ -55,6 +58,57 @@ class TokenStore:
         """Get current count of stored codes and refresh tokens."""
         with self._lock:
             return {"codes": len(self._codes), "refresh_tokens": len(self._refresh)}
+
+    def record_audit(self, event: str, request_id: Optional[str] = None, **kwargs) -> None:
+        """Record an audit event.
+
+        Args:
+            event: Event type (string identifier)
+            request_id: Optional request ID for tracing
+            **kwargs: Event details (client_id, sub, scope, error, etc.)
+        """
+        entry = {
+            "ts": datetime.now(timezone.utc).isoformat() + "Z",
+            "event": event,
+        }
+        if request_id:
+            entry["request_id"] = request_id
+        entry.update(kwargs)
+
+        with self._lock:
+            self._audit.append(entry)
+
+    def get_audit_log(self, limit: int = 100, event_filter: Optional[str] = None,
+                      client_id_filter: Optional[str] = None) -> tuple[int, list]:
+        """Retrieve audit log entries with optional filtering.
+
+        Args:
+            limit: Max entries to return (default 100, max 1000)
+            event_filter: Optional event type to filter by
+            client_id_filter: Optional client_id to filter by
+
+        Returns:
+            tuple[int, list]: (total_in_store, filtered_entries)
+        """
+        limit = min(limit, 1000)
+
+        with self._lock:
+            total = len(self._audit)
+            entries = list(self._audit)
+
+        # Sort by timestamp, most recent first
+        entries.sort(key=lambda x: x["ts"], reverse=True)
+
+        # Apply filters
+        if event_filter:
+            entries = [e for e in entries if e.get("event") == event_filter]
+        if client_id_filter:
+            entries = [e for e in entries if e.get("client_id") == client_id_filter]
+
+        # Limit results
+        entries = entries[:limit]
+
+        return total, entries
 
 
 # Backwards compatibility alias
