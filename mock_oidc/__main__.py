@@ -78,7 +78,7 @@ def main():
 
     app = create_app(config)
     app.run(
-        host="0.0.0.0",  # nosec B104 - intentional for mock testing
+        host="0.0.0.0",  # nosec B104
         port=config.port,
         ssl_context=config.ssl_context,
     )

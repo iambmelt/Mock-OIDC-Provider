@@ -1,6 +1,6 @@
 # Mock OIDC Provider - Multi-stage Dockerfile
 # Stage 1: Builder - Install dependencies and prepare for runtime
-FROM python:3.12-slim as builder
+FROM python:3.12-slim AS builder
 
 # Set working directory
 WORKDIR /build
