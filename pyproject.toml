@@ -10,7 +10,7 @@ dependencies = [
     "flask>=3.0",
     "pyjwt>=2.8",
     "cryptography>=42",
-    "structlog>=24",
+    "structlog>=25.5.0",
 ]
 
 [project.optional-dependencies]
