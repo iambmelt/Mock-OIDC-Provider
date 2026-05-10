@@ -130,9 +130,9 @@ def create_app(config: AppConfig) -> Flask:
             }
 
         if form_client_id:
-            return {"client_id": form_client_id, "client_secret": None, "method": "none"}
+            return {"client_id": form_client_id, "client_secret": None, "method": "none"}  # nosec B105 - None is not a secret
 
-        return {"client_id": None, "client_secret": None, "method": "none"}
+        return {"client_id": None, "client_secret": None, "method": "none"}  # nosec B105 - None is not a secret
 
     @app.route("/health", methods=["GET"])
     def health():
@@ -166,7 +166,7 @@ def create_app(config: AppConfig) -> Flask:
 
         # Simple password validation: accept "pw" for any user
         # This is sufficient for a mock OIDC provider
-        if password != "pw":
+        if password != "pw":  # nosec B105 - test password for mock provider
             return make_response("Invalid credentials", 401)
 
         # Validate required parameters
@@ -670,7 +670,7 @@ def create_app(config: AppConfig) -> Flask:
 
             response = {
                 "access_token": access_token,
-                "token_type": "Bearer",
+                "token_type": "Bearer",  # nosec B105 - not a password
                 "expires_in": config.access_token_ttl,
                 "scope": scope,
             }
@@ -850,7 +850,7 @@ def create_app(config: AppConfig) -> Flask:
             "client_id": claims.get("aud"),
             "exp": claims.get("exp"),
             "iat": claims.get("iat"),
-            "token_type": "Bearer",
+            "token_type": "Bearer",  # nosec B105 - not a password
             "jti": claims.get("jti"),
         }
 

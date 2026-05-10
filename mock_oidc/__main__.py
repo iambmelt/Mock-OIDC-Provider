@@ -77,7 +77,7 @@ def main():
         config.ssl_context = (args.ssl_cert, args.ssl_key)
 
     app = create_app(config)
-    app.run(host="0.0.0.0", port=config.port, ssl_context=config.ssl_context)
+    app.run(host="0.0.0.0", port=config.port, ssl_context=config.ssl_context)  # nosec B104 - intentional for mock testing
 
 
 if __name__ == "__main__":
