@@ -33,6 +33,73 @@ def client(app):
     return app.test_client()
 
 
+# ===== Test Utilities (Phase 5) =====
+
+def assert_jwt_has_claims(token_str, required_claims):
+    """Verify JWT has all required claims.
+
+    Args:
+        token_str: JWT token string
+        required_claims: List of claim names that must be present
+    """
+    claims = pyjwt.decode(token_str, options={"verify_signature": False})
+    for claim in required_claims:
+        assert claim in claims, f"Required claim '{claim}' missing from token"
+    return claims
+
+
+def assert_error_response(response, expected_error, expected_status=400):
+    """Check OAuth error response format.
+
+    Args:
+        response: Flask test response
+        expected_error: Expected error code (e.g., 'invalid_grant')
+        expected_status: Expected HTTP status code
+    """
+    assert response.status_code == expected_status, \
+        f"Expected status {expected_status}, got {response.status_code}"
+    data = response.get_json()
+    assert "error" in data, "Missing 'error' field in error response"
+    assert data["error"] == expected_error, \
+        f"Expected error '{expected_error}', got '{data['error']}'"
+    assert "error_description" in data, "Missing 'error_description' in error response"
+    assert data["error_description"], "error_description must be non-empty"
+    return data
+
+
+def get_claim_value(token_str, claim_key):
+    """Extract claim value from JWT safely.
+
+    Args:
+        token_str: JWT token string
+        claim_key: Claim name to extract
+
+    Returns:
+        Claim value or None if not present
+    """
+    claims = pyjwt.decode(token_str, options={"verify_signature": False})
+    return claims.get(claim_key)
+
+
+def assert_timestamp_ordering(claims):
+    """Verify JWT timestamp claims are properly ordered: iat <= nbf <= exp.
+
+    Args:
+        claims: JWT claims dict (should have 'iat', 'nbf', 'exp')
+    """
+    iat = claims.get("iat")
+    nbf = claims.get("nbf")
+    exp = claims.get("exp")
+
+    assert iat is not None, "Missing 'iat' claim"
+    assert nbf is not None, "Missing 'nbf' claim"
+    assert exp is not None, "Missing 'exp' claim"
+
+    assert iat <= nbf, f"iat ({iat}) must be <= nbf ({nbf})"
+    assert nbf <= exp, f"nbf ({nbf}) must be <= exp ({exp})"
+    assert iat < exp, f"iat ({iat}) must be < exp ({exp})"
+
+
 def do_authorize(
     client,
     client_id="test-client",
