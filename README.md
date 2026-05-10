@@ -549,19 +549,6 @@ Single-use refresh token with rotation. Claims:
 
 ---
 
-## Project Status
-
-**Phases Implemented:**
-- Phase 1 (Foundation): Package structure, testability, no side effects on import
-- Phase 2 (Correctness): Stable `sub`, `/userinfo`, `at_hash`, proper PKCE, redirect_uri validation
-- Phase 3 (Capability): `/introspect`, `/revoke`, `client_credentials`, user config, client config
-- Phase 4 (Robustness): Thread-safe TokenStore, TTL eviction, structured logging, request IDs
-- Phase 5 (Testing): Full test suite with comprehensive coverage
-- Phase 6 (Deployment): Docker support, GitHub Actions CI/CD, automated publishing
-- Phase 7 (Observability): In-memory audit log, admin endpoints
-
-**Test Coverage:** 351+ tests across all major flows and edge cases (including 35 Phase 7 admin/audit tests)
-
 ## Use Cases
 
 This mock OIDC provider is ideal for:
