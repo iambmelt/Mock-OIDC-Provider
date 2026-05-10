@@ -128,3 +128,199 @@ def test_token_refresh_single_use(client):
     )
     assert resp3.status_code == 400
     assert resp3.get_json()["error"] == "invalid_grant"
+
+
+# Phase 2 tests - Sub stability and at_hash
+
+
+def test_token_sub_stable_same_username(client):
+    """Test that sub is stable for the same username across multiple authorizations."""
+    # First authorization
+    code1, _ = do_authorize(client, username="alice@example.com")
+    resp1 = exchange_code(client, code1)
+    data1 = resp1.get_json()
+    at_claims1 = decode_jwt(data1["access_token"])
+    id_claims1 = decode_jwt(data1["id_token"])
+
+    # Second authorization with same username
+    code2, _ = do_authorize(client, username="alice@example.com")
+    resp2 = exchange_code(client, code2)
+    data2 = resp2.get_json()
+    at_claims2 = decode_jwt(data2["access_token"])
+    id_claims2 = decode_jwt(data2["id_token"])
+
+    # Same user should have same sub
+    assert at_claims1["sub"] == at_claims2["sub"]
+    assert id_claims1["sub"] == id_claims2["sub"]
+    assert at_claims1["sub"] == id_claims1["sub"]
+
+
+def test_token_sub_different_for_different_users(client):
+    """Test that sub differs for different users."""
+    code1, _ = do_authorize(client, username="alice@example.com")
+    resp1 = exchange_code(client, code1)
+    data1 = resp1.get_json()
+    sub1 = decode_jwt(data1["id_token"])["sub"]
+
+    code2, _ = do_authorize(client, username="bob@example.com")
+    resp2 = exchange_code(client, code2)
+    data2 = resp2.get_json()
+    sub2 = decode_jwt(data2["id_token"])["sub"]
+
+    # Different users should have different subs
+    assert sub1 != sub2
+
+
+def test_token_at_hash_present_in_id_token(client):
+    """Test that at_hash is present in ID token when access token is issued."""
+    code, _ = do_authorize(client)
+    resp = exchange_code(client, code)
+    data = resp.get_json()
+    id_claims = decode_jwt(data["id_token"])
+
+    # at_hash should be present
+    assert "at_hash" in id_claims
+
+
+def test_token_at_hash_format(client):
+    """Test that at_hash is properly formatted (base64url without padding)."""
+    code, _ = do_authorize(client)
+    resp = exchange_code(client, code)
+    data = resp.get_json()
+    id_claims = decode_jwt(data["id_token"])
+    at_hash = id_claims.get("at_hash")
+
+    # Should be a base64url string (alphanumeric, -, _, no =)
+    assert at_hash
+    assert all(c in "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_" for c in at_hash)
+
+
+def test_token_sub_stable_after_refresh(client):
+    """Test that sub remains the same after refresh token exchange."""
+    code, _ = do_authorize(client, username="charlie@example.com")
+    resp1 = exchange_code(client, code)
+    data1 = resp1.get_json()
+    original_sub = decode_jwt(data1["id_token"])["sub"]
+    refresh_token = data1["refresh_token"]
+
+    # Exchange refresh token
+    resp2 = client.post(
+        "/token",
+        data={
+            "grant_type": "refresh_token",
+            "refresh_token": refresh_token,
+            "client_id": "test-client",
+        },
+    )
+    assert resp2.status_code == 200
+    data2 = resp2.get_json()
+    refreshed_sub = decode_jwt(data2["id_token"])["sub"]
+
+    # Sub should remain the same
+    assert original_sub == refreshed_sub
+
+
+def test_token_redirect_uri_mismatch_fails(client):
+    """Test that redirect_uri mismatch between authorize and token fails."""
+    code, _ = do_authorize(client, redirect_uri="http://localhost/cb1")
+
+    # Try to exchange code with different redirect_uri
+    resp = exchange_code(client, code, redirect_uri="http://localhost/cb2")
+    assert resp.status_code == 400
+    data = resp.get_json()
+    assert data["error"] == "invalid_grant"
+    assert "redirect_uri" in data.get("error_description", "").lower()
+
+
+def test_token_redirect_uri_match_succeeds(client):
+    """Test that matching redirect_uri succeeds."""
+    redirect_uri = "http://example.com/callback"
+    code, _ = do_authorize(client, redirect_uri=redirect_uri)
+
+    # Exchange with matching redirect_uri
+    resp = exchange_code(client, code, redirect_uri=redirect_uri)
+    assert resp.status_code == 200
+    assert "access_token" in resp.get_json()
+
+
+def test_token_pkce_code_challenge_stored(client):
+    """Test that code_challenge is stored regardless of PKCE config."""
+    import hashlib
+    import base64
+    from mock_oidc.crypto import base64url_no_pad
+
+    verifier = "a" * 43
+    digest = hashlib.sha256(verifier.encode("utf-8")).digest()
+    challenge = base64url_no_pad(digest)
+
+    code, _ = do_authorize(
+        client,
+        code_challenge=challenge,
+        code_challenge_method="S256",
+    )
+
+    # Exchange with correct verifier should succeed
+    resp = exchange_code(client, code, code_verifier=verifier)
+    assert resp.status_code == 200
+    assert "access_token" in resp.get_json()
+
+
+def test_token_pkce_wrong_verifier_fails(client):
+    """Test that wrong code_verifier fails PKCE validation."""
+    import hashlib
+    from mock_oidc.crypto import base64url_no_pad
+
+    verifier = "a" * 43
+    digest = hashlib.sha256(verifier.encode("utf-8")).digest()
+    challenge = base64url_no_pad(digest)
+
+    code, _ = do_authorize(
+        client,
+        code_challenge=challenge,
+        code_challenge_method="S256",
+    )
+
+    # Exchange with wrong verifier should fail
+    wrong_verifier = "b" * 43
+    resp = exchange_code(client, code, code_verifier=wrong_verifier)
+    assert resp.status_code == 400
+    data = resp.get_json()
+    assert data["error"] == "invalid_grant"
+
+
+def test_token_pkce_missing_verifier_fails(client):
+    """Test that missing code_verifier when challenge exists fails."""
+    import hashlib
+    from mock_oidc.crypto import base64url_no_pad
+
+    verifier = "a" * 43
+    digest = hashlib.sha256(verifier.encode("utf-8")).digest()
+    challenge = base64url_no_pad(digest)
+
+    code, _ = do_authorize(
+        client,
+        code_challenge=challenge,
+        code_challenge_method="S256",
+    )
+
+    # Exchange without verifier should fail
+    resp = exchange_code(client, code)
+    assert resp.status_code == 400
+    data = resp.get_json()
+    assert data["error"] == "invalid_request"
+
+
+def test_token_pkce_plain_method(client):
+    """Test PKCE with plain code_challenge_method."""
+    challenge = "plain_challenge_string_43_chars_minimum"
+
+    code, _ = do_authorize(
+        client,
+        code_challenge=challenge,
+        code_challenge_method="plain",
+    )
+
+    # Exchange with same verifier should succeed
+    resp = exchange_code(client, code, code_verifier=challenge)
+    assert resp.status_code == 200
+    assert "access_token" in resp.get_json()

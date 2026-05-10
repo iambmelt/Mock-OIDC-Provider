@@ -1,4 +1,5 @@
 import base64
+import hashlib
 import logging
 import secrets
 import structlog
@@ -153,6 +154,9 @@ def create_app(config: AppConfig) -> Flask:
         if not username or not password:
             return make_response("Missing username/password", 400)
 
+        # Compute stable subject identifier from username
+        sub = "user:" + hashlib.sha256(username.encode("utf-8")).hexdigest()[:16]
+
         code = secrets.token_hex(16)
         client_id = request.form.get("client_id")
         scope = request.form.get("scope") or "openid"
@@ -160,25 +164,26 @@ def create_app(config: AppConfig) -> Flask:
             "client_id": client_id,
             "redirect_uri": request.form.get("redirect_uri"),
             "scope": scope,
+            "sub": sub,
             "exp": now_utc() + timedelta(seconds=config.auth_code_ttl),
             "nonce": request.form.get("nonce") or None,
         }
 
         pkce_method = None
-        if config.pkce:
-            cc = request.form.get("code_challenge")
-            ccm = request.form.get("code_challenge_method") or "plain"
-            if cc:
-                entry["code_challenge"] = cc
-                entry["code_challenge_method"] = ccm
-                pkce_method = ccm
+        # Always store code_challenge if provided, regardless of PKCE config
+        cc = request.form.get("code_challenge")
+        ccm = request.form.get("code_challenge_method") or "plain"
+        if cc:
+            entry["code_challenge"] = cc
+            entry["code_challenge_method"] = ccm
+            pkce_method = ccm
 
         store.put_code(code, entry)
 
         # Log authorization code issuance
         log.info(
             "authorize_code_issued",
-            sub=code,
+            sub=sub,
             client_id=client_id,
             scope=scope,
             pkce_method=pkce_method,
@@ -305,10 +310,24 @@ def create_app(config: AppConfig) -> Flask:
                     )
                     return oauth_error("invalid_request", "PKCE validation failed.")
 
+            # Validate redirect_uri matches if provided in authorization
+            stored_redirect_uri = data.get("redirect_uri")
+            provided_redirect_uri = request.form.get("redirect_uri")
+            if stored_redirect_uri and stored_redirect_uri != provided_redirect_uri:
+                log.warning(
+                    "token_error",
+                    grant_type=grant_type,
+                    error="invalid_grant",
+                    detail="redirect_uri_mismatch",
+                    client_id=client_id,
+                )
+                return oauth_error("invalid_grant", "redirect_uri mismatch.")
+
             scope = request.form.get("scope") or data["scope"]
             tokens = issue_tokens(
                 client_id=client_id,
                 scope=scope,
+                sub=data["sub"],
                 iss=current_issuer(),
                 store=store,
                 config=config,
@@ -441,6 +460,7 @@ def create_app(config: AppConfig) -> Flask:
             tokens = issue_tokens(
                 client_id=client_id,
                 scope=scope,
+                sub=entry["sub"],
                 iss=current_issuer(),
                 store=store,
                 config=config,
@@ -492,6 +512,7 @@ def create_app(config: AppConfig) -> Flask:
                 "issuer": iss,
                 "authorization_endpoint": f"{iss}/authorize",
                 "token_endpoint": f"{iss}/token",
+                "userinfo_endpoint": f"{iss}/userinfo",
                 "jwks_uri": f"{iss}/jwks.json",
                 "response_types_supported": ["code"],
                 "grant_types_supported": ["authorization_code", "refresh_token"],
@@ -503,12 +524,55 @@ def create_app(config: AppConfig) -> Flask:
                     "none",
                 ],
                 "subject_types_supported": ["public"],
+                "scopes_supported": ["openid", "profile", "email", "offline_access"],
+                "claims_supported": ["sub", "iss", "aud", "iat", "exp", "nbf", "name", "email", "nonce", "at_hash"],
             }
         )
 
     @app.route("/jwks.json", methods=["GET"])
     def jwks():
         return jsonify(jwks_dict(config)), 200
+
+    @app.route("/userinfo", methods=["GET", "POST"])
+    def userinfo():
+        """OIDC Core Section 5.3: UserInfo endpoint returns claims about authenticated user."""
+        auth_header = request.headers.get("Authorization", "")
+        if not auth_header.lower().startswith("bearer "):
+            headers = {
+                "WWW-Authenticate": 'Bearer error="missing_token", error_description="Bearer token required"'
+            }
+            return ("", 401, headers)
+
+        token_str = auth_header.split(" ", 1)[1].strip()
+        try:
+            pub_key = load_public_key_from_cert_or_key(config.signing_cert_pem)
+            claims = pyjwt.decode(
+                token_str,
+                pub_key,
+                algorithms=["RS256"],
+                options={"verify_aud": False},
+            )
+        except pyjwt.ExpiredSignatureError:
+            headers = {
+                "WWW-Authenticate": 'Bearer error="invalid_token", error_description="Access token has expired"'
+            }
+            return ("", 401, headers)
+        except Exception:
+            headers = {
+                "WWW-Authenticate": 'Bearer error="invalid_token", error_description="Access token is invalid"'
+            }
+            return ("", 401, headers)
+
+        scope_set = set(claims.get("scope", "").split()) if claims.get("scope") else set()
+        sub = claims.get("sub")
+        response_claims = {"sub": sub}
+
+        if "profile" in scope_set:
+            response_claims["name"] = "Max Musterman"
+        if "email" in scope_set:
+            response_claims["email"] = "max@example.com"
+
+        return jsonify(response_claims), 200
 
     @app.route("/callback", methods=["GET"])
     def callback():

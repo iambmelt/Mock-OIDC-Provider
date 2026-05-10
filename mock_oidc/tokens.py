@@ -1,3 +1,4 @@
+import hashlib
 import secrets
 from datetime import datetime, timedelta, timezone
 
@@ -24,9 +25,16 @@ def sign_jwt(claims: dict, config) -> str:
     return jwt.encode(claims, config.signing_priv_pem, algorithm="RS256", headers=headers)
 
 
-def issue_tokens(client_id: str, scope: str, iss: str, store, config, nonce: str = None) -> dict:
+def compute_hash_claim(token_value: str) -> str:
+    """Compute at_hash claim from access token (left half of SHA-256)."""
+    digest = hashes.Hash(hashes.SHA256())
+    digest.update(token_value.encode("ascii"))
+    left_half = digest.finalize()[:16]  # Left half of SHA-256
+    return base64url_no_pad(left_half)
+
+
+def issue_tokens(client_id: str, scope: str, sub: str, iss: str, store, config, nonce: str = None) -> dict:
     """Issue access, ID, and refresh tokens."""
-    sub = secrets.token_hex(16)
     iat = now_ts()
     refresh_jti = secrets.token_hex(16)
 
@@ -63,17 +71,23 @@ def issue_tokens(client_id: str, scope: str, iss: str, store, config, nonce: str
         "typ": "refresh",
     }
 
+    # Sign access token first so we can compute at_hash
+    access_token = sign_jwt(access_claims, config)
+    at_hash = compute_hash_claim(access_token)
+    id_claims["at_hash"] = at_hash
+
     store.put_refresh(
         refresh_jti,
         {
             "client_id": client_id,
             "scope": scope,
+            "sub": sub,
             "exp": now_utc() + timedelta(seconds=config.refresh_ttl),
         },
     )
 
     return {
-        "access_token": sign_jwt(access_claims, config),
+        "access_token": access_token,
         "id_token": sign_jwt(id_claims, config),
         "refresh_token": sign_jwt(refresh_claims, config),
         "token_type": "Bearer",
