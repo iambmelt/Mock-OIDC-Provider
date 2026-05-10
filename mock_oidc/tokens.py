@@ -1,0 +1,106 @@
+import secrets
+from datetime import datetime, timedelta, timezone
+
+from cryptography.hazmat.primitives import hashes
+import jwt
+
+from mock_oidc.crypto import KID, base64url_no_pad
+
+
+def now_utc() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def now_ts() -> int:
+    return int(now_utc().timestamp())
+
+
+def ts_plus(seconds: int) -> int:
+    return int((now_utc() + timedelta(seconds=seconds)).timestamp())
+
+
+def sign_jwt(claims: dict, config) -> str:
+    headers = {"kid": KID, "alg": "RS256", "typ": "JWT"}
+    return jwt.encode(claims, config.signing_priv_pem, algorithm="RS256", headers=headers)
+
+
+def issue_tokens(client_id: str, scope: str, iss: str, store, config, nonce: str = None) -> dict:
+    """Issue access, ID, and refresh tokens."""
+    sub = secrets.token_hex(16)
+    iat = now_ts()
+    refresh_jti = secrets.token_hex(16)
+
+    access_claims = {
+        "sub": sub,
+        "iss": iss,
+        "aud": client_id,
+        "iat": iat,
+        "nbf": iat,
+        "exp": ts_plus(config.access_token_ttl),
+        "scope": scope,
+    }
+    id_claims = {
+        "sub": sub,
+        "iss": iss,
+        "aud": client_id,
+        "iat": iat,
+        "nbf": iat,
+        "exp": ts_plus(config.id_token_ttl),
+        "name": "Max Musterman",
+        "email": "max@example.com",
+    }
+    if nonce:
+        id_claims["nonce"] = nonce
+
+    refresh_claims = {
+        "sub": sub,
+        "iss": iss,
+        "aud": client_id,
+        "iat": iat,
+        "nbf": iat,
+        "exp": ts_plus(config.refresh_ttl),
+        "jti": refresh_jti,
+        "typ": "refresh",
+    }
+
+    store.put_refresh(
+        refresh_jti,
+        {
+            "client_id": client_id,
+            "scope": scope,
+            "exp": now_utc() + timedelta(seconds=config.refresh_ttl),
+        },
+    )
+
+    return {
+        "access_token": sign_jwt(access_claims, config),
+        "id_token": sign_jwt(id_claims, config),
+        "refresh_token": sign_jwt(refresh_claims, config),
+        "token_type": "Bearer",
+        "expires_in": config.access_token_ttl,
+        "scope": scope,
+    }
+
+
+def validate_pkce(entry: dict, code_verifier: str) -> None:
+    """Validate PKCE code_verifier against stored code_challenge.
+
+    Raises ValueError with a code string on failure.
+    """
+    code_challenge = entry.get("code_challenge")
+    if not code_challenge:
+        raise ValueError("pkce_required")
+    if not code_verifier:
+        raise ValueError("missing_code_verifier")
+    method = entry.get("code_challenge_method", "plain")
+    if method == "plain":
+        if code_verifier != code_challenge:
+            raise ValueError("invalid_code_verifier")
+    elif method == "S256":
+        digest = hashes.Hash(hashes.SHA256())
+        digest.update(code_verifier.encode("ascii"))
+        derived = base64url_no_pad(digest.finalize())
+        if derived != code_challenge:
+            raise ValueError("invalid_code_verifier")
+    else:
+        raise ValueError("unsupported_challenge_method")

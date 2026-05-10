@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Mock OIDC Login</title>
+    <style>
+      body { font-family: -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif; background: #f7f7f7; padding: 2rem; }
+      .box { max-width: 520px; margin: 0 auto; background: #fff; border-radius: 12px; padding: 1.25rem 1.5rem; box-shadow: 0 4px 24px rgba(0,0,0,.06); }
+      label { display: block; margin-top: .75rem; font-weight: 600; }
+      input[type=text], input[type=password] { width: 100%; padding: .5rem .6rem; border: 1px solid #ddd; border-radius: .5rem; font-size: 14px; }
+      .row { display: grid; grid-template-columns: 1fr 1fr; gap: .5rem; }
+      .row > div { min-width: 0; }
+      .muted { color: #666; font-size: 13px; }
+      button { margin-top: 1rem; padding: .5rem .75rem; border: 1px solid #ccc; background: #fafafa; border-radius: .5rem; cursor: pointer; }
+      code { background: #fafafa; padding: .15rem .35rem; border: 1px solid #eee; border-radius: .25rem; }
+    </style>
+  </head>
+  <body>
+    <div class="box">
+      <h2>Sign in</h2>
+      <form method="post" action="/authorize">
+        <label>username</label>
+        <input type="text" name="username" value="user@example.com" />
+        <label>password</label>
+        <input type="password" name="password" value="password" />
+
+        <div class="row">
+          <div>
+            <label>client_id</label>
+            <input type="text" name="client_id" value="{{ client_id }}" />
+          </div>
+          <div>
+            <label>redirect_uri</label>
+            <input type="text" name="redirect_uri" value="{{ redirect_uri }}" />
+          </div>
+        </div>
+
+        <div class="row">
+          <div>
+            <label>scope <span class="muted">(space-delimited)</span></label>
+            <input type="text" name="scope" value="{{ scope }}" />
+          </div>
+          <div>
+            <label>state</label>
+            <input type="text" name="state" value="{{ state }}" />
+          </div>
+        </div>
+
+        <div class="row">
+          <div>
+            <label>nonce</label>
+            <input type="text" name="nonce" value="{{ nonce }}" />
+          </div>
+          <div>
+            <label>code_challenge</label>
+            <input type="text" name="code_challenge" value="{{ code_challenge }}" />
+          </div>
+        </div>
+
+        <div class="row">
+          <div>
+            <label>code_challenge_method</label>
+            <input type="text" name="code_challenge_method" value="{{ code_challenge_method }}" />
+          </div>
+          <div></div>
+        </div>
+
+        <button type="submit">Continue</button>
+      </form>
+      <p class="muted">This page simulates a login form and sets up an authorization code bound to the <code>client_id</code>, <code>redirect_uri</code>, <code>scope</code>, and optional PKCE fields.</p>
+    </div>
+  </body>
+</html>

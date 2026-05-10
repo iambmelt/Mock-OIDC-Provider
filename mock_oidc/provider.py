@@ -1,0 +1,292 @@
+import base64
+import secrets
+from datetime import timedelta
+from urllib.parse import urlencode, urlparse, parse_qsl, urlunparse
+
+import jwt as pyjwt
+from flask import Flask, jsonify, make_response, redirect, render_template, request
+
+from mock_oidc.config import AppConfig
+from mock_oidc.crypto import jwks_dict
+from mock_oidc.store import SimpleStore
+from mock_oidc.tokens import issue_tokens, now_utc, validate_pkce
+
+
+def create_app(config: AppConfig) -> Flask:
+    app = Flask(__name__, template_folder="templates")
+    store = SimpleStore()
+    app.config["MOCK_OIDC_CONFIG"] = config
+    app.config["MOCK_OIDC_STORE"] = store
+
+    def current_issuer() -> str:
+        if config.issuer:
+            return config.issuer.rstrip("/")
+        scheme = "https" if request.is_secure else "http"
+        return f"{scheme}://{request.host}"
+
+    def oauth_error(error: str, description: str, status: int = 400, headers: dict = None):
+        payload = jsonify(error=error, error_description=description)
+        return (payload, status) if headers is None else (payload, status, headers)
+
+    def parse_basic_auth(header_value):
+        if not header_value or not header_value.lower().startswith("basic "):
+            return None, None
+        try:
+            decoded = base64.b64decode(header_value.split(" ", 1)[1]).decode("utf-8")
+            cid, csec = decoded.split(":", 1)
+            return cid, csec
+        except Exception:
+            return None, None
+
+    def extract_client_auth(req):
+        cid_basic, csec_basic = parse_basic_auth(req.headers.get("Authorization"))
+        form_client_id = req.form.get("client_id")
+        form_client_secret = req.form.get("client_secret")
+
+        if cid_basic:
+            if form_client_secret:
+                return {
+                    "error": (
+                        "invalid_request",
+                        "Multiple client authentication methods supplied.",
+                    )
+                }
+            return {
+                "client_id": cid_basic,
+                "client_secret": csec_basic,
+                "method": "client_secret_basic",
+            }
+
+        if form_client_secret:
+            if not form_client_id:
+                return {
+                    "error": (
+                        "invalid_client",
+                        "client_id required when using client_secret.",
+                    )
+                }
+            return {
+                "client_id": form_client_id,
+                "client_secret": form_client_secret,
+                "method": "client_secret_post",
+            }
+
+        if form_client_id:
+            return {"client_id": form_client_id, "client_secret": None, "method": "none"}
+
+        return {"client_id": None, "client_secret": None, "method": "none"}
+
+    @app.route("/authorize", methods=["GET"])
+    def authorize_get():
+        if request.args.get("response_type") != "code":
+            return make_response("response_type must be 'code'", 400)
+        return render_template(
+            "login.html",
+            scope=request.args.get("scope", "openid"),
+            client_id=request.args.get("client_id", ""),
+            redirect_uri=request.args.get("redirect_uri", ""),
+            state=request.args.get("state", ""),
+            nonce=request.args.get("nonce", ""),
+            code_challenge=request.args.get("code_challenge", ""),
+            code_challenge_method=request.args.get("code_challenge_method", ""),
+        )
+
+    @app.route("/authorize", methods=["POST"])
+    def authorize_post():
+        username = request.form.get("username", "")
+        password = request.form.get("password", "")
+        if not username or not password:
+            return make_response("Missing username/password", 400)
+
+        code = secrets.token_hex(16)
+        entry = {
+            "client_id": request.form.get("client_id"),
+            "redirect_uri": request.form.get("redirect_uri"),
+            "scope": request.form.get("scope") or "openid",
+            "exp": now_utc() + timedelta(seconds=config.auth_code_ttl),
+            "nonce": request.form.get("nonce") or None,
+        }
+
+        if config.pkce:
+            cc = request.form.get("code_challenge")
+            ccm = request.form.get("code_challenge_method") or "plain"
+            if cc:
+                entry["code_challenge"] = cc
+                entry["code_challenge_method"] = ccm
+
+        store.put_code(code, entry)
+
+        ru = urlparse(entry["redirect_uri"])
+        q = dict(parse_qsl(ru.query))
+        q["code"] = code
+        st = request.form.get("state")
+        if st:
+            q["state"] = st
+        new_query = urlencode(q)
+        redir = urlunparse(
+            (ru.scheme, ru.netloc, ru.path, ru.params, new_query, ru.fragment)
+        )
+        return redirect(redir, code=302)
+
+    @app.route("/token", methods=["POST"])
+    def token():
+        grant_type = request.form.get("grant_type")
+
+        auth = extract_client_auth(request)
+        if "error" in auth:
+            code, desc = auth["error"]
+            return oauth_error(code, desc)
+
+        provided_client_id = auth.get("client_id")
+        is_confidential = bool(auth.get("client_secret"))
+
+        if grant_type == "authorization_code":
+            code_val = request.form.get("code")
+            data = store.pop_code(code_val)
+            if not data:
+                return oauth_error(
+                    "invalid_grant",
+                    "Authorization code is invalid, already used, or was not issued by this server.",
+                )
+            if now_utc() > data["exp"]:
+                return oauth_error("invalid_grant", "Authorization code has expired.")
+
+            client_id = provided_client_id or data["client_id"]
+            if provided_client_id and provided_client_id != data["client_id"]:
+                return oauth_error("invalid_grant", "Code was issued to a different client.")
+
+            must_validate_pkce = False
+            if data.get("code_challenge"):
+                must_validate_pkce = True
+            elif config.pkce and not is_confidential:
+                must_validate_pkce = True
+
+            if must_validate_pkce:
+                try:
+                    validate_pkce(data, request.form.get("code_verifier"))
+                except ValueError as e:
+                    msg = str(e)
+                    if msg == "pkce_required":
+                        return oauth_error(
+                            "invalid_request",
+                            "PKCE required but no code_challenge associated with this code.",
+                        )
+                    if msg == "missing_code_verifier":
+                        return oauth_error("invalid_request", "Missing code_verifier.")
+                    if msg == "invalid_code_verifier":
+                        return oauth_error("invalid_grant", "Invalid code_verifier.")
+                    if msg == "unsupported_challenge_method":
+                        return oauth_error(
+                            "invalid_request", "Unsupported code_challenge_method."
+                        )
+                    return oauth_error("invalid_request", "PKCE validation failed.")
+
+            scope = request.form.get("scope") or data["scope"]
+            tokens = issue_tokens(
+                client_id=client_id,
+                scope=scope,
+                iss=current_issuer(),
+                store=store,
+                config=config,
+                nonce=data.get("nonce"),
+            )
+            return jsonify(tokens), 200
+
+        elif grant_type == "refresh_token":
+            refresh_token = request.form.get("refresh_token")
+            if not refresh_token:
+                return oauth_error("invalid_request", "Missing refresh_token.")
+
+            try:
+                decoded = pyjwt.decode(
+                    refresh_token,
+                    config.signing_cert_pem,
+                    algorithms=["RS256"],
+                    options={"verify_aud": False},
+                )
+            except Exception:
+                return oauth_error(
+                    "invalid_grant",
+                    "Refresh token is malformed or has an invalid signature.",
+                )
+
+            jti = decoded.get("jti")
+            if not jti:
+                return oauth_error(
+                    "invalid_grant", "Refresh token has been revoked or already used."
+                )
+
+            entry = store.pop_refresh(jti)
+            if not entry:
+                return oauth_error(
+                    "invalid_grant", "Refresh token has been revoked or already used."
+                )
+
+            if now_utc() > entry["exp"]:
+                return oauth_error("invalid_grant", "Refresh token has expired.")
+
+            client_id = provided_client_id or entry["client_id"]
+            if provided_client_id and provided_client_id != entry["client_id"]:
+                return oauth_error("invalid_grant", "Refresh token audience mismatch.")
+
+            scope = entry["scope"]
+            req_scope = request.form.get("scope")
+            if req_scope:
+                requested = set(req_scope.split())
+                original = set(scope.split())
+                if not requested.issubset(original):
+                    return oauth_error(
+                        "invalid_scope",
+                        "Requested scope expands the original scope; only narrowing is allowed.",
+                    )
+                scope = " ".join(sorted(requested))
+
+            tokens = issue_tokens(
+                client_id=client_id,
+                scope=scope,
+                iss=current_issuer(),
+                store=store,
+                config=config,
+            )
+            return jsonify(tokens), 200
+
+        else:
+            return oauth_error(
+                "unsupported_grant_type",
+                "Grant type must be 'authorization_code' or 'refresh_token'.",
+                400,
+            )
+
+    @app.route("/.well-known/openid-configuration", methods=["GET"])
+    def well_known():
+        iss = current_issuer()
+        return jsonify(
+            {
+                "issuer": iss,
+                "authorization_endpoint": f"{iss}/authorize",
+                "token_endpoint": f"{iss}/token",
+                "jwks_uri": f"{iss}/jwks.json",
+                "response_types_supported": ["code"],
+                "grant_types_supported": ["authorization_code", "refresh_token"],
+                "id_token_signing_alg_values_supported": ["RS256"],
+                "code_challenge_methods_supported": ["S256", "plain"],
+                "token_endpoint_auth_methods_supported": [
+                    "client_secret_basic",
+                    "client_secret_post",
+                    "none",
+                ],
+                "subject_types_supported": ["public"],
+            }
+        )
+
+    @app.route("/jwks.json", methods=["GET"])
+    def jwks():
+        return jsonify(jwks_dict(config)), 200
+
+    @app.route("/callback", methods=["GET"])
+    def callback():
+        code = request.args.get("code")
+        state = request.args.get("state")
+        return render_template("callback.html", code=code, state=state)
+
+    return app
