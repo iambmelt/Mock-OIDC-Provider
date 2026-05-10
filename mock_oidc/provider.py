@@ -141,15 +141,17 @@ def create_app(config: AppConfig) -> Flask:
             }
 
         if form_client_id:
+            # client_secret is None for public clients — not a hardcoded credential
             return {
                 "client_id": form_client_id,
-                "client_secret": None,  # nosec B105 - no secret provided (public client)
+                "client_secret": None,  # nosec B105
                 "method": "none",
             }
 
+        # Both fields None — no client authentication present
         return {
             "client_id": None,
-            "client_secret": None,  # nosec B105 - absent, not hardcoded
+            "client_secret": None,  # nosec B105
             "method": "none",
         }
 
@@ -183,9 +185,8 @@ def create_app(config: AppConfig) -> Flask:
         if not username or not password:
             return make_response("Missing username/password", 400)
 
-        # Simple password validation: accept "pw" for any user
-        # This is sufficient for a mock OIDC provider
-        if password != "pw":  # nosec B105 - test password for mock provider
+        # "pw" is the documented test-only password for this mock provider
+        if password != "pw":  # nosec B105
             return make_response("Invalid credentials", 401)
 
         # Validate required parameters
@@ -697,7 +698,7 @@ def create_app(config: AppConfig) -> Flask:
 
             response = {
                 "access_token": access_token,
-                "token_type": "Bearer",  # nosec B105 - OAuth2 token type, not a password
+                "token_type": "Bearer",  # nosec B105
                 "expires_in": config.access_token_ttl,
                 "scope": scope,
             }
@@ -919,7 +920,7 @@ def create_app(config: AppConfig) -> Flask:
             "client_id": claims.get("aud"),
             "exp": claims.get("exp"),
             "iat": claims.get("iat"),
-            "token_type": "Bearer",  # nosec B105 - OAuth2 token type, not a password
+            "token_type": "Bearer",  # nosec B105
             "jti": claims.get("jti"),
         }
 

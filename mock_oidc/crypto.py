@@ -115,7 +115,7 @@ def setup_quickboot_ssl(config) -> None:
         for f in temp_files:
             try:
                 os.remove(f)
-            except Exception:  # nosec B110 - cleanup ignores errors intentionally
+            except Exception:  # nosec B110
                 pass
 
     atexit.register(_cleanup)
