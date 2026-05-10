@@ -1,4 +1,5 @@
 """Tests for Phase 7 admin endpoints and audit logging."""
+
 import pytest
 from tests.conftest import (
     do_authorize,
@@ -48,8 +49,9 @@ class TestAuditLogEndpoint:
 
         # Verify they're sorted by timestamp, most recent first
         for i in range(len(entries) - 1):
-            assert entries[i]["ts"] >= entries[i + 1]["ts"], \
-                "Audit entries should be in reverse chronological order"
+            assert (
+                entries[i]["ts"] >= entries[i + 1]["ts"]
+            ), "Audit entries should be in reverse chronological order"
 
     def test_audit_limit_parameter(self, client):
         """?limit parameter limits returned entries (default 100, max 1000)."""
@@ -201,6 +203,7 @@ class TestAuditLogEndpoint:
             # Should parse as valid ISO8601
             try:
                 from datetime import datetime
+
                 datetime.fromisoformat(ts.rstrip("Z"))
             except ValueError:
                 pytest.fail(f"Timestamp {ts} is not valid ISO8601")

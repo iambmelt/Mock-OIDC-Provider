@@ -11,15 +11,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libssl-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy pyproject.toml to install dependencies
+# Copy package files needed for installation
 COPY pyproject.toml .
+COPY mock_oidc/ ./mock_oidc/
 
-# Install Python dependencies into a virtual environment
-# This keeps the builder stage separate and allows us to copy only what we need
+# Install the package into a virtual environment
 RUN python -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 RUN pip install --upgrade pip setuptools wheel && \
-    pip install -e .
+    pip install .
 
 # Stage 2: Runtime - Minimal image with only runtime dependencies
 FROM python:3.12-slim
@@ -36,11 +36,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy virtual environment from builder stage
+# Copy virtual environment from builder stage (package is installed inside it)
 COPY --from=builder /opt/venv /opt/venv
-
-# Copy application source code
-COPY mock_oidc/ /app/mock_oidc/
 
 # Set environment variables
 ENV PATH="/opt/venv/bin:$PATH" \
@@ -56,13 +53,17 @@ EXPOSE 4567
 # Health check - container orchestration will use this to monitor health
 # Checks /health endpoint every 10 seconds, allows 3 failures before marking unhealthy
 HEALTHCHECK --interval=10s --timeout=3s --start-period=5s --retries=3 \
-    CMD python -c "import urllib.request, sys; \
-    try: \
-        response = urllib.request.urlopen('http://localhost:4567/health', timeout=2); \
-        sys.exit(0 if response.status == 200 else 1); \
-    except Exception as e: \
-        print(f'Health check failed: {e}'); \
-        sys.exit(1)"
+    CMD python -c "\
+import urllib.request, ssl, sys; \
+ctx = ssl.create_default_context(); \
+ctx.check_hostname = False; \
+ctx.verify_mode = ssl.CERT_NONE; \
+try: \
+    r = urllib.request.urlopen('https://localhost:4567/health', timeout=2, context=ctx); \
+    sys.exit(0 if r.status == 200 else 1) \
+except Exception as e: \
+    print(f'Health check failed: {e}'); \
+    sys.exit(1)"
 
 # Default entrypoint and command
 # ENTRYPOINT defines the main executable (the mock-oidc command)

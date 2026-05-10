@@ -31,10 +31,7 @@ class TestIssuerURI:
 
     def test_issuer_from_config_when_set(self):
         """Test configured issuer takes precedence."""
-        config = AppConfig(
-            issuer="https://example.com",
-            eviction_interval=0
-        )
+        config = AppConfig(issuer="https://example.com", eviction_interval=0)
         setup_signing_keys(config)
 
         app = create_app(config)
@@ -51,10 +48,7 @@ class TestIssuerURI:
 
         OIDC Core 3.0: Issuer must be URL without trailing slash.
         """
-        config = AppConfig(
-            issuer="https://example.com/",
-            eviction_interval=0
-        )
+        config = AppConfig(issuer="https://example.com/", eviction_interval=0)
         setup_signing_keys(config)
 
         app = create_app(config)
@@ -91,10 +85,7 @@ class TestSchemeDetection:
 
     def test_issuer_consistency_in_all_endpoints(self):
         """Test issuer is consistent across all endpoints."""
-        config = AppConfig(
-            issuer="https://auth.example.com",
-            eviction_interval=0
-        )
+        config = AppConfig(issuer="https://auth.example.com", eviction_interval=0)
         setup_signing_keys(config)
 
         app = create_app(config)
@@ -138,10 +129,7 @@ class TestEndpointURIs:
 
     def test_authorization_endpoint_includes_issuer(self):
         """Test authorization_endpoint starts with issuer."""
-        config = AppConfig(
-            issuer="https://example.com",
-            eviction_interval=0
-        )
+        config = AppConfig(issuer="https://example.com", eviction_interval=0)
         setup_signing_keys(config)
 
         app = create_app(config)
@@ -156,10 +144,7 @@ class TestEndpointURIs:
 
     def test_token_endpoint_includes_issuer(self):
         """Test token_endpoint starts with issuer."""
-        config = AppConfig(
-            issuer="https://example.com",
-            eviction_interval=0
-        )
+        config = AppConfig(issuer="https://example.com", eviction_interval=0)
         setup_signing_keys(config)
 
         app = create_app(config)
@@ -174,10 +159,7 @@ class TestEndpointURIs:
 
     def test_jwks_uri_includes_issuer(self):
         """Test jwks_uri starts with issuer."""
-        config = AppConfig(
-            issuer="https://example.com",
-            eviction_interval=0
-        )
+        config = AppConfig(issuer="https://example.com", eviction_interval=0)
         setup_signing_keys(config)
 
         app = create_app(config)
@@ -192,10 +174,7 @@ class TestEndpointURIs:
 
     def test_userinfo_endpoint_includes_issuer(self):
         """Test userinfo_endpoint starts with issuer."""
-        config = AppConfig(
-            issuer="https://example.com",
-            eviction_interval=0
-        )
+        config = AppConfig(issuer="https://example.com", eviction_interval=0)
         setup_signing_keys(config)
 
         app = create_app(config)
@@ -216,10 +195,7 @@ class TestIssuerInTokens:
         """Test issued tokens contain iss claim matching discovery issuer."""
         from tests.conftest import do_authorize, exchange_code, decode_jwt
 
-        config = AppConfig(
-            issuer="https://example.com",
-            eviction_interval=0
-        )
+        config = AppConfig(issuer="https://example.com", eviction_interval=0)
         setup_signing_keys(config)
 
         app = create_app(config)
@@ -243,10 +219,7 @@ class TestIssuerInTokens:
         """Test iss claim in tokens matches discovery issuer."""
         from tests.conftest import do_authorize, exchange_code, decode_jwt
 
-        config = AppConfig(
-            issuer="https://auth.test.com",
-            eviction_interval=0
-        )
+        config = AppConfig(issuer="https://auth.test.com", eviction_interval=0)
         setup_signing_keys(config)
 
         app = create_app(config)

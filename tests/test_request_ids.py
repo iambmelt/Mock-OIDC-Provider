@@ -56,19 +56,14 @@ class TestRequestIDPreservation:
         """Test provided X-Request-ID is preserved in response."""
         custom_id = "test-request-id-custom"
         resp = client.get(
-            "/.well-known/openid-configuration",
-            headers={"X-Request-ID": custom_id}
+            "/.well-known/openid-configuration", headers={"X-Request-ID": custom_id}
         )
         assert resp.headers["X-Request-ID"] == custom_id
 
     def test_request_id_preserved_on_token_endpoint(self, client):
         """Test request ID is preserved on token endpoint."""
         custom_id = "test-token-endpoint-123"
-        resp = client.post(
-            "/token",
-            data={},
-            headers={"X-Request-ID": custom_id}
-        )
+        resp = client.post("/token", data={}, headers={"X-Request-ID": custom_id})
         assert resp.headers["X-Request-ID"] == custom_id
 
     def test_request_id_preserved_on_userinfo(self, client):
@@ -82,8 +77,8 @@ class TestRequestIDPreservation:
             "/userinfo",
             headers={
                 "Authorization": f"Bearer {access_token}",
-                "X-Request-ID": custom_id
-            }
+                "X-Request-ID": custom_id,
+            },
         )
         assert resp.headers["X-Request-ID"] == custom_id
 
@@ -91,26 +86,24 @@ class TestRequestIDPreservation:
         """Test request ID with various characters."""
         custom_id = "req-id_123.test_456"
         resp = client.get(
-            "/.well-known/openid-configuration",
-            headers={"X-Request-ID": custom_id}
+            "/.well-known/openid-configuration", headers={"X-Request-ID": custom_id}
         )
         assert resp.headers["X-Request-ID"] == custom_id
 
     def test_request_id_with_uuid_format(self, client):
         """Test request ID with UUID format."""
         import uuid
+
         custom_id = str(uuid.uuid4())
         resp = client.get(
-            "/.well-known/openid-configuration",
-            headers={"X-Request-ID": custom_id}
+            "/.well-known/openid-configuration", headers={"X-Request-ID": custom_id}
         )
         assert resp.headers["X-Request-ID"] == custom_id
 
     def test_request_id_empty_string_generates_new(self, client):
         """Test empty X-Request-ID header generates new one."""
         resp = client.get(
-            "/.well-known/openid-configuration",
-            headers={"X-Request-ID": ""}
+            "/.well-known/openid-configuration", headers={"X-Request-ID": ""}
         )
         request_id = resp.headers["X-Request-ID"]
         # Should generate new ID
@@ -146,7 +139,7 @@ class TestRequestIDOnAllEndpoints:
                 "scope": "openid",
                 "username": "user@example.com",
                 "password": "pw",
-            }
+            },
         )
         assert "X-Request-ID" in resp.headers
 
@@ -157,8 +150,7 @@ class TestRequestIDOnAllEndpoints:
         access_token = resp.get_json()["access_token"]
 
         resp = client.get(
-            "/userinfo",
-            headers={"Authorization": f"Bearer {access_token}"}
+            "/userinfo", headers={"Authorization": f"Bearer {access_token}"}
         )
         assert "X-Request-ID" in resp.headers
 
@@ -169,7 +161,7 @@ class TestRequestIDOnAllEndpoints:
             data={
                 "token": "dummy-token",
                 "client_id": "test-client",
-            }
+            },
         )
         assert "X-Request-ID" in resp.headers
 
@@ -180,18 +172,13 @@ class TestRequestIDOnAllEndpoints:
             data={
                 "token": "dummy-token",
                 "client_id": "test-client",
-            }
+            },
         )
         assert "X-Request-ID" in resp.headers
 
     def test_request_id_on_error_response(self, client):
         """Test X-Request-ID is present even in error responses."""
-        resp = client.post(
-            "/token",
-            data={
-                "grant_type": "invalid_grant_type"
-            }
-        )
+        resp = client.post("/token", data={"grant_type": "invalid_grant_type"})
         assert resp.status_code == 400
         assert "X-Request-ID" in resp.headers
 
@@ -213,8 +200,7 @@ class TestRequestIDConsistency:
         """Test request ID is consistent for request/response pair."""
         custom_id = "consistency-test-id"
         resp = client.get(
-            "/.well-known/openid-configuration",
-            headers={"X-Request-ID": custom_id}
+            "/.well-known/openid-configuration", headers={"X-Request-ID": custom_id}
         )
         response_id = resp.headers["X-Request-ID"]
 
@@ -240,8 +226,7 @@ class TestRequestIDFormats:
         """Test numeric request ID is preserved."""
         custom_id = "123456789"
         resp = client.get(
-            "/.well-known/openid-configuration",
-            headers={"X-Request-ID": custom_id}
+            "/.well-known/openid-configuration", headers={"X-Request-ID": custom_id}
         )
         assert resp.headers["X-Request-ID"] == custom_id
 
@@ -249,8 +234,7 @@ class TestRequestIDFormats:
         """Test alphanumeric request ID is preserved."""
         custom_id = "ABC123DEF456"
         resp = client.get(
-            "/.well-known/openid-configuration",
-            headers={"X-Request-ID": custom_id}
+            "/.well-known/openid-configuration", headers={"X-Request-ID": custom_id}
         )
         assert resp.headers["X-Request-ID"] == custom_id
 
@@ -258,8 +242,7 @@ class TestRequestIDFormats:
         """Test hyphenated request ID is preserved."""
         custom_id = "req-id-001-abc"
         resp = client.get(
-            "/.well-known/openid-configuration",
-            headers={"X-Request-ID": custom_id}
+            "/.well-known/openid-configuration", headers={"X-Request-ID": custom_id}
         )
         assert resp.headers["X-Request-ID"] == custom_id
 
@@ -267,7 +250,6 @@ class TestRequestIDFormats:
         """Test long request ID is preserved."""
         custom_id = "a" * 100
         resp = client.get(
-            "/.well-known/openid-configuration",
-            headers={"X-Request-ID": custom_id}
+            "/.well-known/openid-configuration", headers={"X-Request-ID": custom_id}
         )
         assert resp.headers["X-Request-ID"] == custom_id

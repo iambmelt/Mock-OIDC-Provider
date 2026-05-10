@@ -35,6 +35,7 @@ def client(app):
 
 # ===== Test Utilities (Phase 5) =====
 
+
 def assert_jwt_has_claims(token_str, required_claims):
     """Verify JWT has all required claims.
 
@@ -56,12 +57,14 @@ def assert_error_response(response, expected_error, expected_status=400):
         expected_error: Expected error code (e.g., 'invalid_grant')
         expected_status: Expected HTTP status code
     """
-    assert response.status_code == expected_status, \
-        f"Expected status {expected_status}, got {response.status_code}"
+    assert (
+        response.status_code == expected_status
+    ), f"Expected status {expected_status}, got {response.status_code}"
     data = response.get_json()
     assert "error" in data, "Missing 'error' field in error response"
-    assert data["error"] == expected_error, \
-        f"Expected error '{expected_error}', got '{data['error']}'"
+    assert (
+        data["error"] == expected_error
+    ), f"Expected error '{expected_error}', got '{data['error']}'"
     assert "error_description" in data, "Missing 'error_description' in error response"
     assert data["error_description"], "error_description must be non-empty"
     return data
@@ -175,7 +178,9 @@ def concurrent_exchange_code(client, code, num_requests=5):
     def exchange():
         resp = exchange_code(client, code)
         with lock:
-            results.append((resp.status_code, resp.get_json() if resp.status_code == 200 else None))
+            results.append(
+                (resp.status_code, resp.get_json() if resp.status_code == 200 else None)
+            )
 
     threads = [threading.Thread(target=exchange) for _ in range(num_requests)]
     for thread in threads:

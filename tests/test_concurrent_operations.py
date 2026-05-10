@@ -69,7 +69,12 @@ class TestConcurrentTokenExchange:
         def exchange():
             resp = exchange_code(client, code)
             with lock:
-                results.append((resp.status_code, resp.get_json() if resp.status_code == 200 else None))
+                results.append(
+                    (
+                        resp.status_code,
+                        resp.get_json() if resp.status_code == 200 else None,
+                    )
+                )
 
         threads = [threading.Thread(target=exchange) for _ in range(10)]
         for thread in threads:
@@ -127,10 +132,15 @@ class TestConcurrentRefreshToken:
                     "grant_type": "refresh_token",
                     "refresh_token": refresh_token,
                     "client_id": "test-client",
-                }
+                },
             )
             with lock:
-                results.append((resp.status_code, resp.get_json() if resp.status_code == 200 else None))
+                results.append(
+                    (
+                        resp.status_code,
+                        resp.get_json() if resp.status_code == 200 else None,
+                    )
+                )
 
         threads = [threading.Thread(target=refresh) for _ in range(5)]
         for thread in threads:
@@ -162,7 +172,7 @@ class TestConcurrentRefreshToken:
                     "grant_type": "refresh_token",
                     "refresh_token": token,
                     "client_id": "test-client",
-                }
+                },
             )
             with lock:
                 results.append(resp.status_code)
@@ -195,7 +205,7 @@ class TestConcurrentIntrospection:
                 data={
                     "token": access_token,
                     "client_id": "test-client",
-                }
+                },
             )
             with lock:
                 results.append(resp.status_code)
@@ -231,7 +241,7 @@ class TestConcurrentRevocation:
                 data={
                     "token": refresh_token,
                     "client_id": "test-client",
-                }
+                },
             )
             with lock:
                 results.append(resp.status_code)
@@ -262,7 +272,7 @@ class TestConcurrentRevocation:
                 data={
                     "token": token,
                     "client_id": "test-client",
-                }
+                },
             )
             with lock:
                 results.append(resp.status_code)
@@ -381,7 +391,7 @@ class TestMixedConcurrentOperations:
                         "grant_type": "refresh_token",
                         "refresh_token": refresh_token,
                         "client_id": "test-client",
-                    }
+                    },
                 )
                 with lock:
                     results.append((resp1.status_code, resp2.status_code))

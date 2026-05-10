@@ -104,7 +104,7 @@ class TestHTTPMethods:
                 "scope": "openid",
                 "username": "user@example.com",
                 "password": "pw",
-            }
+            },
         )
         # Should return 302 (redirect) or error
         assert resp.status_code in [302, 400, 401]
@@ -195,8 +195,7 @@ class TestHTTPHeaders:
         """Test X-Request-ID is preserved if provided."""
         custom_id = "test-request-id-12345"
         resp = client.get(
-            "/.well-known/openid-configuration",
-            headers={"X-Request-ID": custom_id}
+            "/.well-known/openid-configuration", headers={"X-Request-ID": custom_id}
         )
         assert resp.headers["X-Request-ID"] == custom_id
 
@@ -230,7 +229,10 @@ class TestCORSHeaders:
             # May or may not be present, but if present should be reasonable
             if header in resp.headers:
                 # Should not be "*" for security
-                assert resp.headers[header] != "*" or header == "Access-Control-Allow-Methods"
+                assert (
+                    resp.headers[header] != "*"
+                    or header == "Access-Control-Allow-Methods"
+                )
 
 
 class TestStatusCodes:

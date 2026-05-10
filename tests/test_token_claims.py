@@ -7,8 +7,12 @@ Tests verify all required JWT claims per OIDC Core and OpenID Core specs:
 
 import time
 from tests.conftest import (
-    do_authorize, exchange_code, decode_jwt,
-    assert_jwt_has_claims, assert_timestamp_ordering, get_claim_value
+    do_authorize,
+    exchange_code,
+    decode_jwt,
+    assert_jwt_has_claims,
+    assert_timestamp_ordering,
+    get_claim_value,
 )
 
 
@@ -195,7 +199,10 @@ class TestIDTokenClaims:
 
         at_hash = claims.get("at_hash")
         # Should be base64url (alphanumeric, -, _)
-        assert all(c in "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_" for c in at_hash)
+        assert all(
+            c in "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
+            for c in at_hash
+        )
         # Should not have padding
         assert "=" not in at_hash
 

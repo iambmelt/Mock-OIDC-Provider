@@ -17,10 +17,7 @@ class TestLoggingFormatText:
 
     def test_app_runs_with_text_log_format(self):
         """Test app runs with text log format."""
-        config = AppConfig(
-            log_format="text",
-            eviction_interval=0
-        )
+        config = AppConfig(log_format="text", eviction_interval=0)
         setup_signing_keys(config)
 
         app = create_app(config)
@@ -32,10 +29,7 @@ class TestLoggingFormatText:
 
     def test_special_characters_in_text_logging(self):
         """Test special characters don't break text logging."""
-        config = AppConfig(
-            log_format="text",
-            eviction_interval=0
-        )
+        config = AppConfig(log_format="text", eviction_interval=0)
         setup_signing_keys(config)
 
         app = create_app(config)
@@ -48,17 +42,14 @@ class TestLoggingFormatText:
             data={
                 "grant_type": "invalid",
                 "client_id": "test_client@#$%",
-            }
+            },
         )
         # Should not crash
         assert resp.status_code in [200, 400]
 
     def test_unicode_characters_in_text_logging(self):
         """Test unicode characters are handled in text logging."""
-        config = AppConfig(
-            log_format="text",
-            eviction_interval=0
-        )
+        config = AppConfig(log_format="text", eviction_interval=0)
         setup_signing_keys(config)
 
         app = create_app(config)
@@ -71,7 +62,7 @@ class TestLoggingFormatText:
             data={
                 "grant_type": "invalid",
                 "client_id": "test_client_你好",
-            }
+            },
         )
         # Should not crash
         assert resp.status_code in [200, 400]
@@ -82,10 +73,7 @@ class TestLoggingFormatJSON:
 
     def test_app_runs_with_json_log_format(self):
         """Test app runs with JSON log format."""
-        config = AppConfig(
-            log_format="json",
-            eviction_interval=0
-        )
+        config = AppConfig(log_format="json", eviction_interval=0)
         setup_signing_keys(config)
 
         app = create_app(config)
@@ -101,10 +89,7 @@ class TestLoggingFormatJSON:
         import io
         import sys
 
-        config = AppConfig(
-            log_format="json",
-            eviction_interval=0
-        )
+        config = AppConfig(log_format="json", eviction_interval=0)
         setup_signing_keys(config)
 
         app = create_app(config)
@@ -125,10 +110,7 @@ class TestNoSensitiveDataInLogs:
 
         Security: Tokens should never appear in logs.
         """
-        config = AppConfig(
-            log_format="text",
-            eviction_interval=0
-        )
+        config = AppConfig(log_format="text", eviction_interval=0)
         setup_signing_keys(config)
 
         app = create_app(config)
@@ -146,10 +128,7 @@ class TestNoSensitiveDataInLogs:
 
     def test_refresh_token_not_exposed(self):
         """Test refresh tokens are not exposed unnecessarily."""
-        config = AppConfig(
-            log_format="text",
-            eviction_interval=0
-        )
+        config = AppConfig(log_format="text", eviction_interval=0)
         setup_signing_keys(config)
 
         app = create_app(config)
@@ -165,10 +144,7 @@ class TestNoSensitiveDataInLogs:
 
     def test_password_not_logged(self):
         """Test passwords are not logged."""
-        config = AppConfig(
-            log_format="text",
-            eviction_interval=0
-        )
+        config = AppConfig(log_format="text", eviction_interval=0)
         setup_signing_keys(config)
 
         app = create_app(config)
@@ -185,7 +161,7 @@ class TestNoSensitiveDataInLogs:
                 "scope": "openid",
                 "username": "user@example.com",
                 "password": password,
-            }
+            },
         )
         # Password should not be in response
         assert password not in resp.data.decode("utf-8", errors="ignore")
@@ -196,11 +172,7 @@ class TestLogLevels:
 
     def test_info_log_level(self):
         """Test INFO log level works."""
-        config = AppConfig(
-            log_format="text",
-            log_level="INFO",
-            eviction_interval=0
-        )
+        config = AppConfig(log_format="text", log_level="INFO", eviction_interval=0)
         setup_signing_keys(config)
 
         app = create_app(config)
@@ -212,11 +184,7 @@ class TestLogLevels:
 
     def test_debug_log_level(self):
         """Test DEBUG log level works."""
-        config = AppConfig(
-            log_format="text",
-            log_level="DEBUG",
-            eviction_interval=0
-        )
+        config = AppConfig(log_format="text", log_level="DEBUG", eviction_interval=0)
         setup_signing_keys(config)
 
         app = create_app(config)
@@ -228,11 +196,7 @@ class TestLogLevels:
 
     def test_warning_log_level(self):
         """Test WARNING log level works."""
-        config = AppConfig(
-            log_format="text",
-            log_level="WARNING",
-            eviction_interval=0
-        )
+        config = AppConfig(log_format="text", log_level="WARNING", eviction_interval=0)
         setup_signing_keys(config)
 
         app = create_app(config)
@@ -250,10 +214,7 @@ class TestLoggingWithRequestID:
         """Test request ID is in logging context."""
         import structlog
 
-        config = AppConfig(
-            log_format="text",
-            eviction_interval=0
-        )
+        config = AppConfig(log_format="text", eviction_interval=0)
         setup_signing_keys(config)
 
         app = create_app(config)
@@ -262,8 +223,7 @@ class TestLoggingWithRequestID:
 
         custom_id = "test-log-request-id-123"
         resp = client.get(
-            "/.well-known/openid-configuration",
-            headers={"X-Request-ID": custom_id}
+            "/.well-known/openid-configuration", headers={"X-Request-ID": custom_id}
         )
         assert resp.status_code == 200
         # Request ID should be in logs (hard to verify directly)
@@ -276,10 +236,7 @@ class TestLoggingFormats:
     def test_text_and_json_formats_both_work(self):
         """Test both text and JSON formats are functional."""
         for log_format in ["text", "json"]:
-            config = AppConfig(
-                log_format=log_format,
-                eviction_interval=0
-            )
+            config = AppConfig(log_format=log_format, eviction_interval=0)
             setup_signing_keys(config)
 
             app = create_app(config)
@@ -291,10 +248,7 @@ class TestLoggingFormats:
 
     def test_text_format_readability(self):
         """Test text format is reasonably readable."""
-        config = AppConfig(
-            log_format="text",
-            eviction_interval=0
-        )
+        config = AppConfig(log_format="text", eviction_interval=0)
         setup_signing_keys(config)
 
         app = create_app(config)
@@ -308,10 +262,7 @@ class TestLoggingFormats:
 
     def test_json_format_parseable(self):
         """Test JSON format output is parseable JSON."""
-        config = AppConfig(
-            log_format="json",
-            eviction_interval=0
-        )
+        config = AppConfig(log_format="json", eviction_interval=0)
         setup_signing_keys(config)
 
         app = create_app(config)

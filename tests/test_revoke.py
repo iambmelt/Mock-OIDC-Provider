@@ -1,4 +1,5 @@
 """Tests for /revoke endpoint (RFC 7009)."""
+
 import pytest
 
 from tests.conftest import do_authorize, exchange_code, decode_jwt

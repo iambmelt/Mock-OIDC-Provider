@@ -8,8 +8,10 @@ Tests verify refresh token implementation per RFC 6749 and OIDC Core specs:
 import threading
 import time
 from tests.conftest import (
-    do_authorize, exchange_code, decode_jwt,
-    assert_timestamp_ordering
+    do_authorize,
+    exchange_code,
+    decode_jwt,
+    assert_timestamp_ordering,
 )
 
 
@@ -31,7 +33,7 @@ class TestRefreshBasics:
                 "grant_type": "refresh_token",
                 "refresh_token": refresh_token,
                 "client_id": "test-client",
-            }
+            },
         )
         assert resp2.status_code == 200
         data = resp2.get_json()
@@ -53,7 +55,7 @@ class TestRefreshBasics:
                 "grant_type": "refresh_token",
                 "refresh_token": refresh_token,
                 "client_id": "test-client",
-            }
+            },
         )
         new_access_token = resp2.get_json()["access_token"]
 
@@ -75,7 +77,7 @@ class TestRefreshBasics:
                 "grant_type": "refresh_token",
                 "refresh_token": refresh_token,
                 "client_id": "test-client",
-            }
+            },
         )
         assert resp2.status_code == 200
         data = resp2.get_json()
@@ -101,7 +103,7 @@ class TestRefreshSubStability:
                 "grant_type": "refresh_token",
                 "refresh_token": refresh_token,
                 "client_id": "test-client",
-            }
+            },
         )
         new_sub = decode_jwt(resp2.get_json()["id_token"])["sub"]
 
@@ -119,7 +121,7 @@ class TestRefreshSubStability:
                 "grant_type": "refresh_token",
                 "refresh_token": refresh_token,
                 "client_id": "test-client",
-            }
+            },
         )
         data = resp2.get_json()
         access_claims = decode_jwt(data["access_token"])
@@ -147,7 +149,7 @@ class TestRefreshSingleUse:
                 "grant_type": "refresh_token",
                 "refresh_token": refresh_token,
                 "client_id": "test-client",
-            }
+            },
         )
         assert resp2.status_code == 200
 
@@ -158,7 +160,7 @@ class TestRefreshSingleUse:
                 "grant_type": "refresh_token",
                 "refresh_token": refresh_token,
                 "client_id": "test-client",
-            }
+            },
         )
         assert resp3.status_code == 400
         data = resp3.get_json()
@@ -180,7 +182,7 @@ class TestRefreshSingleUse:
                 "grant_type": "refresh_token",
                 "refresh_token": refresh_token_1,
                 "client_id": "test-client",
-            }
+            },
         )
         assert resp2.status_code == 200
         refresh_token_2 = resp2.get_json()["refresh_token"]
@@ -192,7 +194,7 @@ class TestRefreshSingleUse:
                 "grant_type": "refresh_token",
                 "refresh_token": refresh_token_2,
                 "client_id": "test-client",
-            }
+            },
         )
         assert resp3.status_code == 200
 
@@ -219,7 +221,7 @@ class TestRefreshConcurrency:
                     "grant_type": "refresh_token",
                     "refresh_token": refresh_token,
                     "client_id": "test-client",
-                }
+                },
             )
             with lock:
                 results.append(resp.status_code)
@@ -271,7 +273,7 @@ class TestRefreshTTL:
                 "grant_type": "refresh_token",
                 "refresh_token": refresh_token,
                 "client_id": "test-client",
-            }
+            },
         )
         new_access_token = resp2.get_json()["access_token"]
         claims = decode_jwt(new_access_token)
@@ -299,7 +301,7 @@ class TestRefreshScope:
                 "grant_type": "refresh_token",
                 "refresh_token": refresh_token,
                 "client_id": "test-client",
-            }
+            },
         )
         new_access_token = resp2.get_json()["access_token"]
         claims = decode_jwt(new_access_token)
@@ -325,7 +327,7 @@ class TestRefreshScope:
                 "refresh_token": refresh_token,
                 "client_id": "test-client",
                 "scope": "openid",  # Narrower
-            }
+            },
         )
         assert resp2.status_code == 200
 
@@ -345,7 +347,7 @@ class TestRefreshScope:
                 "refresh_token": refresh_token,
                 "client_id": "test-client",
                 "scope": "openid profile email",  # Wider
-            }
+            },
         )
         # Should either fail or return narrower scope
         if resp2.status_code == 200:
@@ -376,7 +378,7 @@ class TestRefreshClientId:
                 "grant_type": "refresh_token",
                 "refresh_token": refresh_token,
                 # Missing client_id
-            }
+            },
         )
         assert resp2.status_code == 400
 
@@ -396,7 +398,7 @@ class TestRefreshClientId:
                 "grant_type": "refresh_token",
                 "refresh_token": refresh_token,
                 "client_id": "client-2",  # Different client
-            }
+            },
         )
         # Should fail or be tied to original client
         # Implementation may vary
@@ -417,7 +419,7 @@ class TestRefreshTokenClaims:
                 "grant_type": "refresh_token",
                 "refresh_token": refresh_token,
                 "client_id": "test-client",
-            }
+            },
         )
         access_token = resp2.get_json()["access_token"]
         claims = decode_jwt(access_token)
@@ -438,7 +440,7 @@ class TestRefreshTokenClaims:
                 "grant_type": "refresh_token",
                 "refresh_token": refresh_token,
                 "client_id": "test-client",
-            }
+            },
         )
         id_token = resp2.get_json()["id_token"]
         claims = decode_jwt(id_token)
@@ -457,7 +459,7 @@ class TestRefreshTokenClaims:
                 "grant_type": "refresh_token",
                 "refresh_token": refresh_token,
                 "client_id": "test-client",
-            }
+            },
         )
         access_token = resp2.get_json()["access_token"]
         claims = decode_jwt(access_token)
@@ -477,7 +479,7 @@ class TestRefreshTokenClaims:
                 "grant_type": "refresh_token",
                 "refresh_token": refresh_token,
                 "client_id": "test-client",
-            }
+            },
         )
         new_jti = decode_jwt(resp2.get_json()["access_token"])["jti"]
 
@@ -500,7 +502,7 @@ class TestRefreshIssuer:
                 "grant_type": "refresh_token",
                 "refresh_token": refresh_token,
                 "client_id": "test-client",
-            }
+            },
         )
         new_iss = decode_jwt(resp2.get_json()["id_token"])["iss"]
 

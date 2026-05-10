@@ -25,12 +25,13 @@ class TestScopeBasics:
                 "scope": "profile email",
                 "username": "user@example.com",
                 "password": "pw",
-            }
+            },
         )
         # Should still work - openid not strictly enforced in mock
         # But if it works, verify scope is handled
         if resp.status_code == 302:
             from urllib.parse import urlparse, parse_qsl
+
             params = dict(parse_qsl(urlparse(resp.headers["Location"]).query))
             assert "code" in params
 
@@ -151,7 +152,7 @@ class TestRefreshTokenScope:
                 "refresh_token": refresh_token,
                 "client_id": "test-client",
                 "scope": "openid",  # Narrower scope
-            }
+            },
         )
         assert resp2.status_code == 200
         new_access_token = resp2.get_json()["access_token"]
@@ -178,7 +179,7 @@ class TestRefreshTokenScope:
                 "refresh_token": refresh_token,
                 "client_id": "test-client",
                 "scope": "openid profile email",  # Wider scope
-            }
+            },
         )
         # Should fail or return narrower scope
         if resp2.status_code == 200:
@@ -208,7 +209,7 @@ class TestRefreshTokenScope:
                 "grant_type": "refresh_token",
                 "refresh_token": refresh_token,
                 "client_id": "test-client",
-            }
+            },
         )
         assert resp2.status_code == 200
         new_access_token = resp2.get_json()["access_token"]

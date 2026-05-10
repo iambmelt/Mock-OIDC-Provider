@@ -1,4 +1,5 @@
 """Integration tests for Phase 4 implementation."""
+
 import time
 import threading
 from datetime import datetime, timedelta, timezone
@@ -91,6 +92,7 @@ class TestPhase4Integration:
     def test_ttl_eviction_disabled_in_tests(self):
         """Verify eviction is disabled (interval=0) in default test config."""
         from tests.conftest import base_config
+
         # The base_config fixture sets eviction_interval=0
         config = AppConfig(eviction_interval=0)
         setup_signing_keys(config)
@@ -139,7 +141,7 @@ class TestPhase4Integration:
         # Request with X-Request-ID should preserve it
         resp2 = client.get(
             "/.well-known/openid-configuration",
-            headers={"X-Request-ID": "custom-request-123"}
+            headers={"X-Request-ID": "custom-request-123"},
         )
         assert resp2.headers["X-Request-ID"] == "custom-request-123"
 
@@ -152,11 +154,7 @@ class TestPhase4Integration:
         client = app.test_client()
 
         # Issue an auth code - should log authorize_code_issued
-        code, _ = do_authorize(
-            client,
-            client_id="test-client",
-            scope="openid profile"
-        )
+        code, _ = do_authorize(client, client_id="test-client", scope="openid profile")
         assert code is not None
 
     def test_token_issued_logging(self):

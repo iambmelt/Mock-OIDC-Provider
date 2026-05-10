@@ -42,8 +42,9 @@ class TestDiscoveryRequired:
         doc = resp.get_json()
         assert "authorization_endpoint" in doc
         assert doc["authorization_endpoint"]
-        assert doc["authorization_endpoint"].startswith("http://") or \
-               doc["authorization_endpoint"].startswith("https://")
+        assert doc["authorization_endpoint"].startswith("http://") or doc[
+            "authorization_endpoint"
+        ].startswith("https://")
 
     def test_discovery_has_token_endpoint(self, client):
         """Test token_endpoint is present per OIDC Core 3.0.
@@ -54,8 +55,9 @@ class TestDiscoveryRequired:
         doc = resp.get_json()
         assert "token_endpoint" in doc
         assert doc["token_endpoint"]
-        assert doc["token_endpoint"].startswith("http://") or \
-               doc["token_endpoint"].startswith("https://")
+        assert doc["token_endpoint"].startswith("http://") or doc[
+            "token_endpoint"
+        ].startswith("https://")
 
     def test_discovery_has_jwks_uri(self, client):
         """Test jwks_uri is present per OIDC Core 3.0.
@@ -66,8 +68,9 @@ class TestDiscoveryRequired:
         doc = resp.get_json()
         assert "jwks_uri" in doc
         assert doc["jwks_uri"]
-        assert doc["jwks_uri"].startswith("http://") or \
-               doc["jwks_uri"].startswith("https://")
+        assert doc["jwks_uri"].startswith("http://") or doc["jwks_uri"].startswith(
+            "https://"
+        )
 
     def test_discovery_has_subject_types_supported(self, client):
         """Test subject_types_supported is present per OIDC Core 3.0.
@@ -106,8 +109,9 @@ class TestDiscoveryOptional:
         doc = resp.get_json()
         assert "userinfo_endpoint" in doc
         assert doc["userinfo_endpoint"]
-        assert doc["userinfo_endpoint"].startswith("http://") or \
-               doc["userinfo_endpoint"].startswith("https://")
+        assert doc["userinfo_endpoint"].startswith("http://") or doc[
+            "userinfo_endpoint"
+        ].startswith("https://")
 
     def test_discovery_has_revocation_endpoint(self, client):
         """Test revocation_endpoint is present.
@@ -119,8 +123,9 @@ class TestDiscoveryOptional:
         # Check if present
         if "revocation_endpoint" in doc:
             assert doc["revocation_endpoint"]
-            assert doc["revocation_endpoint"].startswith("http://") or \
-                   doc["revocation_endpoint"].startswith("https://")
+            assert doc["revocation_endpoint"].startswith("http://") or doc[
+                "revocation_endpoint"
+            ].startswith("https://")
 
     def test_discovery_has_introspection_endpoint(self, client):
         """Test introspection_endpoint is present.
@@ -131,8 +136,9 @@ class TestDiscoveryOptional:
         doc = resp.get_json()
         if "introspection_endpoint" in doc:
             assert doc["introspection_endpoint"]
-            assert doc["introspection_endpoint"].startswith("http://") or \
-                   doc["introspection_endpoint"].startswith("https://")
+            assert doc["introspection_endpoint"].startswith("http://") or doc[
+                "introspection_endpoint"
+            ].startswith("https://")
 
     def test_discovery_grant_types_supported(self, client):
         """Test grant_types_supported array.
@@ -200,8 +206,10 @@ class TestDiscoveryOptional:
             assert isinstance(doc["code_challenge_methods_supported"], list)
             # If present, S256 should be supported
             if len(doc["code_challenge_methods_supported"]) > 0:
-                assert "S256" in doc["code_challenge_methods_supported"] or \
-                       "plain" in doc["code_challenge_methods_supported"]
+                assert (
+                    "S256" in doc["code_challenge_methods_supported"]
+                    or "plain" in doc["code_challenge_methods_supported"]
+                )
 
 
 class TestDiscoveryEndpointURIs:

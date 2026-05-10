@@ -13,7 +13,14 @@ from flask import Flask, g, jsonify, make_response, redirect, render_template, r
 from mock_oidc.config import AppConfig
 from mock_oidc.crypto import jwks_dict, load_public_key_from_cert_or_key
 from mock_oidc.store import TokenStore
-from mock_oidc.tokens import issue_tokens, now_utc, validate_pkce, sign_jwt, now_ts, ts_plus
+from mock_oidc.tokens import (
+    issue_tokens,
+    now_utc,
+    validate_pkce,
+    sign_jwt,
+    now_ts,
+    ts_plus,
+)
 
 
 def create_app(config: AppConfig) -> Flask:
@@ -48,9 +55,11 @@ def create_app(config: AppConfig) -> Flask:
 
     # Start background TTL eviction thread if enabled
     if config.eviction_interval > 0:
+
         def _evict_loop():
             while True:
                 import time
+
                 time.sleep(config.eviction_interval)
                 codes_evicted, refresh_evicted = store.evict_expired()
                 if codes_evicted > 0 or refresh_evicted > 0:
@@ -82,7 +91,9 @@ def create_app(config: AppConfig) -> Flask:
         scheme = "https" if request.is_secure else "http"
         return f"{scheme}://{request.host}"
 
-    def oauth_error(error: str, description: str, status: int = 400, headers: dict = None):
+    def oauth_error(
+        error: str, description: str, status: int = 400, headers: dict = None
+    ):
         payload = jsonify(error=error, error_description=description)
         return (payload, status) if headers is None else (payload, status, headers)
 
@@ -130,9 +141,13 @@ def create_app(config: AppConfig) -> Flask:
             }
 
         if form_client_id:
-            return {"client_id": form_client_id, "client_secret": None, "method": "none"}  # nosec B105 - None is not a secret
+            return {
+                "client_id": form_client_id,
+                "client_secret": None,
+                "method": "none",
+            }
 
-        return {"client_id": None, "client_secret": None, "method": "none"}  # nosec B105 - None is not a secret
+        return {"client_id": None, "client_secret": None, "method": "none"}
 
     @app.route("/health", methods=["GET"])
     def health():
@@ -297,7 +312,9 @@ def create_app(config: AppConfig) -> Flask:
                     detail="missing_client_id",
                     client_id=provided_client_id,
                 )
-                return oauth_error("invalid_request", "client_id required for public clients.", 400)
+                return oauth_error(
+                    "invalid_request", "client_id required for public clients.", 400
+                )
 
             client_id = provided_client_id or data["client_id"]
             if provided_client_id and provided_client_id != data["client_id"]:
@@ -308,7 +325,9 @@ def create_app(config: AppConfig) -> Flask:
                     detail="client_mismatch",
                     client_id=provided_client_id,
                 )
-                return oauth_error("invalid_grant", "Code was issued to a different client.")
+                return oauth_error(
+                    "invalid_grant", "Code was issued to a different client."
+                )
 
             must_validate_pkce = False
             if data.get("code_challenge"):
@@ -521,7 +540,9 @@ def create_app(config: AppConfig) -> Flask:
                     detail="missing_client_id",
                     client_id=provided_client_id,
                 )
-                return oauth_error("invalid_request", "client_id required for public clients.", 400)
+                return oauth_error(
+                    "invalid_request", "client_id required for public clients.", 400
+                )
 
             client_id = provided_client_id or entry["client_id"]
             if provided_client_id and provided_client_id != entry["client_id"]:
@@ -634,7 +655,9 @@ def create_app(config: AppConfig) -> Flask:
                     detail="missing_scope",
                     client_id=provided_client_id,
                 )
-                return oauth_error("invalid_request", "scope is required for client_credentials.")
+                return oauth_error(
+                    "invalid_request", "scope is required for client_credentials."
+                )
 
             # RFC 6749 Section 4.4.3: For client_credentials, only access_token is issued
             # sub equals client_id per spec
@@ -670,7 +693,7 @@ def create_app(config: AppConfig) -> Flask:
 
             response = {
                 "access_token": access_token,
-                "token_type": "Bearer",  # nosec B105 - not a password
+                "token_type": "Bearer",
                 "expires_in": config.access_token_ttl,
                 "scope": scope,
             }
@@ -695,12 +718,34 @@ def create_app(config: AppConfig) -> Flask:
         iss = current_issuer()
 
         # Build dynamic claims_supported based on loaded users
-        claims_supported = ["sub", "iss", "aud", "iat", "exp", "nbf", "name", "email", "nonce", "at_hash"]
+        claims_supported = [
+            "sub",
+            "iss",
+            "aud",
+            "iat",
+            "exp",
+            "nbf",
+            "name",
+            "email",
+            "nonce",
+            "at_hash",
+        ]
         if config.users:
             # Collect all custom claim keys from user data
             for user_data in config.users.values():
                 for key in user_data.keys():
-                    if key not in ("name", "email", "secret", "redirect_uris", "allowed_grants", "allowed_scopes") and key not in claims_supported:
+                    if (
+                        key
+                        not in (
+                            "name",
+                            "email",
+                            "secret",
+                            "redirect_uris",
+                            "allowed_grants",
+                            "allowed_scopes",
+                        )
+                        and key not in claims_supported
+                    ):
                         claims_supported.append(key)
 
         return jsonify(
@@ -713,7 +758,11 @@ def create_app(config: AppConfig) -> Flask:
                 "userinfo_endpoint": f"{iss}/userinfo",
                 "jwks_uri": f"{iss}/jwks.json",
                 "response_types_supported": ["code"],
-                "grant_types_supported": ["authorization_code", "refresh_token", "client_credentials"],
+                "grant_types_supported": [
+                    "authorization_code",
+                    "refresh_token",
+                    "client_credentials",
+                ],
                 "id_token_signing_alg_values_supported": ["RS256"],
                 "code_challenge_methods_supported": ["S256", "plain"],
                 "token_endpoint_auth_methods_supported": [
@@ -761,7 +810,9 @@ def create_app(config: AppConfig) -> Flask:
             }
             return ("", 401, headers)
 
-        scope_set = set(claims.get("scope", "").split()) if claims.get("scope") else set()
+        scope_set = (
+            set(claims.get("scope", "").split()) if claims.get("scope") else set()
+        )
         sub = claims.get("sub")
         username = claims.get("username")
         response_claims = {"sub": sub}
@@ -792,7 +843,22 @@ def create_app(config: AppConfig) -> Flask:
         else:
             # Add any custom claims that were in the token itself
             for key in claims:
-                if key not in ("sub", "iss", "aud", "iat", "exp", "nbf", "name", "email", "nonce", "at_hash", "scope", "jti", "typ", "username"):
+                if key not in (
+                    "sub",
+                    "iss",
+                    "aud",
+                    "iat",
+                    "exp",
+                    "nbf",
+                    "name",
+                    "email",
+                    "nonce",
+                    "at_hash",
+                    "scope",
+                    "jti",
+                    "typ",
+                    "username",
+                ):
                     response_claims[key] = claims[key]
 
         return jsonify(response_claims), 200
@@ -850,7 +916,7 @@ def create_app(config: AppConfig) -> Flask:
             "client_id": claims.get("aud"),
             "exp": claims.get("exp"),
             "iat": claims.get("iat"),
-            "token_type": "Bearer",  # nosec B105 - not a password
+            "token_type": "Bearer",
             "jti": claims.get("jti"),
         }
 
@@ -900,7 +966,9 @@ def create_app(config: AppConfig) -> Flask:
                 options={"verify_aud": False},
             )
             jti = claims.get("jti")
-            if jti and token_type_hint != "access_token":
+            # RFC 7009 token type hint is an OAuth2 parameter, not a password
+            not_access_token = token_type_hint != "access_token"  # nosec B105
+            if jti and not_access_token:
                 # Try to revoke the refresh token
                 was_revoked = store.revoke_refresh(jti)
                 store.record_audit(
@@ -941,13 +1009,16 @@ def create_app(config: AppConfig) -> Flask:
             client_id_filter=client_id_filter,
         )
 
-        return jsonify(
-            {
-                "count": len(entries),
-                "total_in_store": total_in_store,
-                "entries": entries,
-            }
-        ), 200
+        return (
+            jsonify(
+                {
+                    "count": len(entries),
+                    "total_in_store": total_in_store,
+                    "entries": entries,
+                }
+            ),
+            200,
+        )
 
     @app.route("/admin/store", methods=["GET"])
     def admin_store():
@@ -955,13 +1026,16 @@ def create_app(config: AppConfig) -> Flask:
         counts = store.counts()
         audit_count = len(store._audit)
 
-        return jsonify(
-            {
-                "codes": counts["codes"],
-                "refresh_tokens": counts["refresh_tokens"],
-                "audit_events": audit_count,
-            }
-        ), 200
+        return (
+            jsonify(
+                {
+                    "codes": counts["codes"],
+                    "refresh_tokens": counts["refresh_tokens"],
+                    "audit_events": audit_count,
+                }
+            ),
+            200,
+        )
 
     @app.route("/admin/", methods=["GET"])
     def admin_dashboard():

@@ -5,6 +5,7 @@ from typing import Any, Optional
 @dataclass
 class AppConfig:
     """Immutable configuration for Mock OIDC Provider."""
+
     port: int = 4567
     auth_code_ttl: int = 300
     access_token_ttl: int = 3600

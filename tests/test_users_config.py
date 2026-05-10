@@ -1,4 +1,5 @@
 """Tests for users configuration file loading and integration."""
+
 import pytest
 import json
 import tempfile
@@ -17,10 +18,18 @@ class TestUsersConfig:
     def users_config(self):
         """Create a temporary users config file."""
         users = {
-            "alice": {"name": "Alice Smith", "email": "alice@example.com", "groups": ["admin", "users"]},
-            "bob": {"name": "Bob Johnson", "email": "bob@example.com", "department": "Engineering"},
+            "alice": {
+                "name": "Alice Smith",
+                "email": "alice@example.com",
+                "groups": ["admin", "users"],
+            },
+            "bob": {
+                "name": "Bob Johnson",
+                "email": "bob@example.com",
+                "department": "Engineering",
+            },
         }
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
             json.dump(users, f)
             temp_path = f.name
         yield temp_path
@@ -33,7 +42,7 @@ class TestUsersConfig:
         setup_signing_keys(cfg)
 
         # Load users config
-        with open(users_config, 'r') as f:
+        with open(users_config, "r") as f:
             cfg.users = json.load(f)
 
         app = create_app(cfg)
@@ -88,7 +97,9 @@ class TestUsersConfig:
         """Custom claims should appear in /userinfo."""
         client = app_with_users.test_client()
 
-        code, _ = do_authorize(client, username="bob", password="pw", scope="openid profile email")
+        code, _ = do_authorize(
+            client, username="bob", password="pw", scope="openid profile email"
+        )
         resp = exchange_code(client, code, scope="openid profile email")
         tokens = resp.get_json()
         access_token = tokens["access_token"]
@@ -165,7 +176,9 @@ class TestUsersConfig:
         """Custom claims should work with offline_access scope."""
         client = app_with_users.test_client()
 
-        code, _ = do_authorize(client, username="alice", password="pw", scope="openid offline_access")
+        code, _ = do_authorize(
+            client, username="alice", password="pw", scope="openid offline_access"
+        )
         resp = exchange_code(client, code, scope="openid offline_access")
         assert resp.status_code == 200
         tokens = resp.get_json()

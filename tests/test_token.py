@@ -1,5 +1,10 @@
 import re
-from tests.conftest import do_authorize, exchange_code, decode_jwt, concurrent_exchange_code
+from tests.conftest import (
+    do_authorize,
+    exchange_code,
+    decode_jwt,
+    concurrent_exchange_code,
+)
 
 
 def test_token_no_grant_type(client):
@@ -192,7 +197,10 @@ def test_token_at_hash_format(client):
 
     # Should be a base64url string (alphanumeric, -, _, no =)
     assert at_hash
-    assert all(c in "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_" for c in at_hash)
+    assert all(
+        c in "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
+        for c in at_hash
+    )
 
 
 def test_token_sub_stable_after_refresh(client):

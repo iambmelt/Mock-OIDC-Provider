@@ -1,4 +1,5 @@
 """Tests for structured logging and request ID middleware."""
+
 import time
 from unittest.mock import patch
 import pytest
@@ -144,11 +145,14 @@ class TestAuthorizationLogging:
 
         # Create an expired code
         exp = now_utc() - timedelta(seconds=10)
-        store.put_code("expired-code", {
-            "client_id": "test-client",
-            "exp": exp,
-            "scope": "openid",
-        })
+        store.put_code(
+            "expired-code",
+            {
+                "client_id": "test-client",
+                "exp": exp,
+                "scope": "openid",
+            },
+        )
 
         resp = exchange_code(client, "expired-code")
         assert resp.status_code == 400

@@ -22,7 +22,9 @@ def ts_plus(seconds: int) -> int:
 
 def sign_jwt(claims: dict, config) -> str:
     headers = {"kid": KID, "alg": "RS256", "typ": "JWT"}
-    return jwt.encode(claims, config.signing_priv_pem, algorithm="RS256", headers=headers)
+    return jwt.encode(
+        claims, config.signing_priv_pem, algorithm="RS256", headers=headers
+    )
 
 
 def compute_hash_claim(token_value: str) -> str:
@@ -33,7 +35,17 @@ def compute_hash_claim(token_value: str) -> str:
     return base64url_no_pad(left_half)
 
 
-def issue_tokens(client_id: str, scope: str, sub: str, iss: str, store, config, nonce: str = None, user_claims: dict = None, username: str = None) -> dict:
+def issue_tokens(
+    client_id: str,
+    scope: str,
+    sub: str,
+    iss: str,
+    store,
+    config,
+    nonce: str = None,
+    user_claims: dict = None,
+    username: str = None,
+) -> dict:
     """Issue access, ID, and refresh tokens."""
     iat = now_ts()
     access_jti = secrets.token_hex(16)

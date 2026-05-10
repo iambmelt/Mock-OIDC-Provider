@@ -24,10 +24,7 @@ class TestTokenEndpointErrors:
 
         RFC 6749 Section 5.2: Invalid grant type returns unsupported_grant_type.
         """
-        resp = client.post(
-            "/token",
-            data={"grant_type": "unknown_grant_type"}
-        )
+        resp = client.post("/token", data={"grant_type": "unknown_grant_type"})
         assert_error_response(resp, "unsupported_grant_type", 400)
 
     def test_token_missing_code(self, client):
@@ -41,7 +38,7 @@ class TestTokenEndpointErrors:
                 "grant_type": "authorization_code",
                 "client_id": "test-client",
                 "redirect_uri": "http://localhost/cb",
-            }
+            },
         )
         assert_error_response(resp, "invalid_request", 400)
 
@@ -62,6 +59,7 @@ class TestTokenEndpointErrors:
 
         # Simulate code expiration by advancing time past TTL
         import time
+
         original_time = time.time
         expired_time = original_time() + config.auth_code_ttl + 100
 
@@ -110,7 +108,7 @@ class TestTokenEndpointErrors:
                 "grant_type": "authorization_code",
                 "code": code,
                 "redirect_uri": "http://localhost/cb",
-            }
+            },
         )
         assert_error_response(resp, "invalid_request", 400)
 
@@ -129,7 +127,7 @@ class TestRefreshTokenErrors:
                 "grant_type": "refresh_token",
                 "refresh_token": "invalid.token.string",
                 "client_id": "test-client",
-            }
+            },
         )
         # Should fail - invalid JWT or wrong signature
         assert resp.status_code in [400, 401]
@@ -144,7 +142,7 @@ class TestRefreshTokenErrors:
             data={
                 "grant_type": "refresh_token",
                 "client_id": "test-client",
-            }
+            },
         )
         assert_error_response(resp, "invalid_request", 400)
 
@@ -161,7 +159,7 @@ class TestRefreshTokenErrors:
                 "grant_type": "refresh_token",
                 "refresh_token": refresh_token,
                 "client_id": "test-client",
-            }
+            },
         )
         assert resp2.status_code == 200
 
@@ -172,7 +170,7 @@ class TestRefreshTokenErrors:
                 "grant_type": "refresh_token",
                 "refresh_token": refresh_token,
                 "client_id": "test-client",
-            }
+            },
         )
         assert_error_response(resp3, "invalid_grant", 400)
 
@@ -259,10 +257,7 @@ class TestUserInfoErrors:
 
         RFC 6750 Section 2: Missing token returns 401.
         """
-        resp = client.get(
-            "/userinfo",
-            headers={"Authorization": "Bearer "}
-        )
+        resp = client.get("/userinfo", headers={"Authorization": "Bearer "})
         assert resp.status_code == 401
 
     def test_userinfo_wrong_auth_scheme(self, client):
@@ -270,10 +265,7 @@ class TestUserInfoErrors:
 
         RFC 6750 Section 2: Only Bearer is supported.
         """
-        resp = client.get(
-            "/userinfo",
-            headers={"Authorization": "Basic dXNlcjpwYXNz"}
-        )
+        resp = client.get("/userinfo", headers={"Authorization": "Basic dXNlcjpwYXNz"})
         assert resp.status_code == 401
         assert "WWW-Authenticate" in resp.headers
 
@@ -283,8 +275,7 @@ class TestUserInfoErrors:
         RFC 6750 Section 3: Invalid token returns 401.
         """
         resp = client.get(
-            "/userinfo",
-            headers={"Authorization": "Bearer not.a.valid.jwt"}
+            "/userinfo", headers={"Authorization": "Bearer not.a.valid.jwt"}
         )
         assert resp.status_code == 401
         assert "WWW-Authenticate" in resp.headers
@@ -304,7 +295,7 @@ class TestAuthorizationEndpointErrors:
                 "response_type": "code",
                 "redirect_uri": "http://localhost/cb",
                 "scope": "openid",
-            }
+            },
         )
         # Should fail - client_id required for form-based auth
         assert resp.status_code in [400, 302]
@@ -321,7 +312,7 @@ class TestAuthorizationEndpointErrors:
                 "scope": "openid",
                 "username": "user@example.com",
                 "password": "pw",
-            }
+            },
         )
         # Should fail - redirect_uri required
         assert resp.status_code in [400, 302]
@@ -336,7 +327,7 @@ class TestAuthorizationEndpointErrors:
                 "scope": "openid",
                 "username": "nonexistent@example.com",
                 "password": "wrongpassword",
-            }
+            },
         )
         # Should fail - invalid credentials
         assert resp.status_code in [400, 401]
@@ -384,11 +375,12 @@ class TestErrorStatePreservation:
                 "state": "test-state-12345",
                 "username": "nonexistent@example.com",
                 "password": "wrong",
-            }
+            },
         )
         # If error is returned as redirect, state should be preserved
         if resp.status_code == 302:
             from urllib.parse import urlparse, parse_qsl
+
             location = resp.headers["Location"]
             params = dict(parse_qsl(urlparse(location).query))
             if "error" in params:
@@ -415,5 +407,7 @@ class TestErrorContentType:
         assert resp.status_code == 401
         if resp.content_type:
             # Should have JSON or be proper WWW-Authenticate challenge
-            assert "application/json" in resp.content_type or \
-                   "WWW-Authenticate" in resp.headers
+            assert (
+                "application/json" in resp.content_type
+                or "WWW-Authenticate" in resp.headers
+            )

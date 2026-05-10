@@ -59,7 +59,9 @@ class TokenStore:
         with self._lock:
             return {"codes": len(self._codes), "refresh_tokens": len(self._refresh)}
 
-    def record_audit(self, event: str, request_id: Optional[str] = None, **kwargs) -> None:
+    def record_audit(
+        self, event: str, request_id: Optional[str] = None, **kwargs
+    ) -> None:
         """Record an audit event.
 
         Args:
@@ -78,8 +80,12 @@ class TokenStore:
         with self._lock:
             self._audit.append(entry)
 
-    def get_audit_log(self, limit: int = 100, event_filter: Optional[str] = None,
-                      client_id_filter: Optional[str] = None) -> tuple[int, list]:
+    def get_audit_log(
+        self,
+        limit: int = 100,
+        event_filter: Optional[str] = None,
+        client_id_filter: Optional[str] = None,
+    ) -> tuple[int, list]:
         """Retrieve audit log entries with optional filtering.
 
         Args:

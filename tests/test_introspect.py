@@ -1,4 +1,5 @@
 """Tests for /introspect endpoint (RFC 7662)."""
+
 import pytest
 from datetime import datetime, timedelta, timezone
 
@@ -85,7 +86,9 @@ class TestIntrospectBasic:
     def test_introspect_invalid_signature_returns_active_false(self, client):
         """Token with invalid signature should return active: false, not error."""
         # Create a fake token with bad signature
-        bad_token = "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ0ZXN0In0.badsignature"
+        bad_token = (
+            "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ0ZXN0In0.badsignature"
+        )
 
         introspect_resp = client.post(
             "/introspect",

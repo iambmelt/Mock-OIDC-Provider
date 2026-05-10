@@ -107,7 +107,7 @@ jobs:
         run: bandit -r mock_oidc -f json -o bandit-report.json || true
 
       - name: Display bandit results
-        run: bandit -r mock_oidc || true
+        run: bandit -r mock_oidc
 
   docker:
     name: Docker Build and Smoke Test
