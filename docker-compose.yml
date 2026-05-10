@@ -1,0 +1,50 @@
+version: '3.8'
+
+services:
+  mock-oidc:
+    # Build from local Dockerfile
+    build:
+      context: .
+      dockerfile: Dockerfile
+
+    # Container name for easy reference
+    container_name: mock-oidc-provider
+
+    # Port mapping: expose port 4567 on the host
+    ports:
+      - "4567:4567"
+
+    # Health check configuration for Docker Compose
+    # Checks /health endpoint, marks as healthy after 1 successful check
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4567/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+
+    # Environment variables can be passed here
+    environment:
+      PYTHONUNBUFFERED: "1"
+
+    # Volumes: optional mounting of users.json for persistent user configuration
+    # Uncomment to mount a users.json file from your host:
+    # volumes:
+    #   - ./users.json:/app/users.json:ro
+
+    # Command override examples:
+    # By default, the container runs with --ssl-quickboot (generates self-signed certs)
+    #
+    # To override and provide custom options, use:
+    # command: ["--port", "8443", "--issuer", "https://localhost:8443"]
+    #
+    # To enable PKCE requirement:
+    # command: ["--ssl-quickboot", "--pkce"]
+    #
+    # To mount and use a users.json file:
+    # command: ["--ssl-quickboot", "--users", "/app/users.json"]
+    #
+    # To use custom signing certificates:
+    # volumes:
+    #   - ./certs:/app/certs:ro
+    # command: ["--ssl-quickboot", "--cert", "/app/certs/cert.pem", "--key", "/app/certs/key.pem"]

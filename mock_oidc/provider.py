@@ -4,7 +4,7 @@ import logging
 import secrets
 import structlog
 import threading
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 from urllib.parse import urlencode, urlparse, parse_qsl, urlunparse
 
 import jwt as pyjwt
@@ -21,6 +21,8 @@ def create_app(config: AppConfig) -> Flask:
     store = TokenStore()
     app.config["MOCK_OIDC_CONFIG"] = config
     app.config["MOCK_OIDC_STORE"] = store
+    # Track startup time for health endpoint
+    app.config["MOCK_OIDC_START_TIME"] = datetime.now(timezone.utc)
 
     # Configure structlog based on config
     if config.log_format == "json":
@@ -132,6 +134,14 @@ def create_app(config: AppConfig) -> Flask:
 
         return {"client_id": None, "client_secret": None, "method": "none"}
 
+    @app.route("/health", methods=["GET"])
+    def health():
+        """Health check endpoint for container orchestration."""
+        start_time = app.config["MOCK_OIDC_START_TIME"]
+        now = datetime.now(timezone.utc)
+        uptime_seconds = int((now - start_time).total_seconds())
+        return jsonify(status="ok", uptime_seconds=uptime_seconds), 200
+
     @app.route("/authorize", methods=["GET"])
     def authorize_get():
         if request.args.get("response_type") != "code":
@@ -154,6 +164,15 @@ def create_app(config: AppConfig) -> Flask:
         if not username or not password:
             return make_response("Missing username/password", 400)
 
+        # If users config is loaded, verify username is known
+        if config.users and username not in config.users:
+            log.warning(
+                "authorize_error",
+                error="unknown_user",
+                username=username,
+            )
+            return make_response("Unknown user", 400)
+
         # Compute stable subject identifier from username
         sub = "user:" + hashlib.sha256(username.encode("utf-8")).hexdigest()[:16]
 
@@ -165,6 +184,7 @@ def create_app(config: AppConfig) -> Flask:
             "redirect_uri": request.form.get("redirect_uri"),
             "scope": scope,
             "sub": sub,
+            "username": username,
             "exp": now_utc() + timedelta(seconds=config.auth_code_ttl),
             "nonce": request.form.get("nonce") or None,
         }
@@ -324,6 +344,21 @@ def create_app(config: AppConfig) -> Flask:
                 return oauth_error("invalid_grant", "redirect_uri mismatch.")
 
             scope = request.form.get("scope") or data["scope"]
+
+            # Gather user claims if users config is loaded
+            user_claims = None
+            if config.users and data.get("username") in config.users:
+                user_data = config.users[data["username"]]
+                user_claims = {}
+                if "name" in user_data:
+                    user_claims["name"] = user_data["name"]
+                if "email" in user_data:
+                    user_claims["email"] = user_data["email"]
+                # Include any other custom claims (groups, department, etc.)
+                for key, val in user_data.items():
+                    if key not in ("name", "email", "secret", "redirect_uris", "allowed_grants", "allowed_scopes"):
+                        user_claims[key] = val
+
             tokens = issue_tokens(
                 client_id=client_id,
                 scope=scope,
@@ -332,6 +367,7 @@ def create_app(config: AppConfig) -> Flask:
                 store=store,
                 config=config,
                 nonce=data.get("nonce"),
+                user_claims=user_claims,
             )
 
             # Log successful token issuance
@@ -464,6 +500,7 @@ def create_app(config: AppConfig) -> Flask:
                 iss=current_issuer(),
                 store=store,
                 config=config,
+                user_claims=None,
             )
 
             # Log successful token issuance from refresh
@@ -490,6 +527,53 @@ def create_app(config: AppConfig) -> Flask:
 
             return jsonify(tokens), 200
 
+        elif grant_type == "client_credentials":
+            # RFC 6749 Section 4.4: Client Credentials Grant
+            if not is_confidential:
+                log.warning(
+                    "token_error",
+                    grant_type=grant_type,
+                    error="invalid_client",
+                    detail="confidential_client_required",
+                    client_id=provided_client_id,
+                )
+                return oauth_error(
+                    "invalid_client",
+                    "client_credentials requires client_secret authentication.",
+                )
+
+            scope = request.form.get("scope", "")
+            if not scope:
+                log.warning(
+                    "token_error",
+                    grant_type=grant_type,
+                    error="invalid_request",
+                    detail="missing_scope",
+                    client_id=provided_client_id,
+                )
+                return oauth_error("invalid_request", "scope is required for client_credentials.")
+
+            # Per RFC 6749 Section 4.4.3, sub equals client_id
+            tokens = issue_tokens(
+                client_id=provided_client_id,
+                scope=scope,
+                sub=provided_client_id,
+                iss=current_issuer(),
+                store=store,
+                config=config,
+                only_access=True,
+            )
+
+            log.info(
+                "token_issued",
+                grant_type=grant_type,
+                client_id=provided_client_id,
+                scope=scope,
+                sub=provided_client_id,
+            )
+
+            return jsonify(tokens), 200
+
         else:
             log.warning(
                 "token_error",
@@ -500,22 +584,34 @@ def create_app(config: AppConfig) -> Flask:
             )
             return oauth_error(
                 "unsupported_grant_type",
-                "Grant type must be 'authorization_code' or 'refresh_token'.",
+                "Grant type must be 'authorization_code', 'refresh_token', or 'client_credentials'.",
                 400,
             )
 
     @app.route("/.well-known/openid-configuration", methods=["GET"])
     def well_known():
         iss = current_issuer()
+
+        # Build dynamic claims_supported based on loaded users
+        claims_supported = ["sub", "iss", "aud", "iat", "exp", "nbf", "name", "email", "nonce", "at_hash"]
+        if config.users:
+            # Collect all custom claim keys from user data
+            for user_data in config.users.values():
+                for key in user_data.keys():
+                    if key not in ("name", "email", "secret", "redirect_uris", "allowed_grants", "allowed_scopes") and key not in claims_supported:
+                        claims_supported.append(key)
+
         return jsonify(
             {
                 "issuer": iss,
                 "authorization_endpoint": f"{iss}/authorize",
                 "token_endpoint": f"{iss}/token",
+                "introspection_endpoint": f"{iss}/introspect",
+                "revocation_endpoint": f"{iss}/revoke",
                 "userinfo_endpoint": f"{iss}/userinfo",
                 "jwks_uri": f"{iss}/jwks.json",
                 "response_types_supported": ["code"],
-                "grant_types_supported": ["authorization_code", "refresh_token"],
+                "grant_types_supported": ["authorization_code", "refresh_token", "client_credentials"],
                 "id_token_signing_alg_values_supported": ["RS256"],
                 "code_challenge_methods_supported": ["S256", "plain"],
                 "token_endpoint_auth_methods_supported": [
@@ -525,7 +621,7 @@ def create_app(config: AppConfig) -> Flask:
                 ],
                 "subject_types_supported": ["public"],
                 "scopes_supported": ["openid", "profile", "email", "offline_access"],
-                "claims_supported": ["sub", "iss", "aud", "iat", "exp", "nbf", "name", "email", "nonce", "at_hash"],
+                "claims_supported": claims_supported,
             }
         )
 
@@ -567,10 +663,25 @@ def create_app(config: AppConfig) -> Flask:
         sub = claims.get("sub")
         response_claims = {"sub": sub}
 
+        # Check if we have user claims from config (for non-client_credentials flows)
+        # User claims were merged into ID token during issue_tokens, so we check that path
+        # For now, return claims that were in the token itself (they came from user config)
+        # Plus add claims based on scopes
         if "profile" in scope_set:
-            response_claims["name"] = "Max Musterman"
+            if "name" in claims:
+                response_claims["name"] = claims["name"]
+            else:
+                response_claims["name"] = "Max Musterman"
         if "email" in scope_set:
-            response_claims["email"] = "max@example.com"
+            if "email" in claims:
+                response_claims["email"] = claims["email"]
+            else:
+                response_claims["email"] = "max@example.com"
+
+        # Add any custom claims that were in the token
+        for key in claims:
+            if key not in ("sub", "iss", "aud", "iat", "exp", "nbf", "name", "email", "nonce", "at_hash", "scope", "jti", "typ"):
+                response_claims[key] = claims[key]
 
         return jsonify(response_claims), 200
 
@@ -579,5 +690,111 @@ def create_app(config: AppConfig) -> Flask:
         code = request.args.get("code")
         state = request.args.get("state")
         return render_template("callback.html", code=code, state=state)
+
+    @app.route("/introspect", methods=["POST"])
+    def introspect():
+        """RFC 7662: Token Introspection endpoint."""
+        token = request.form.get("token")
+        if not token:
+            log.warning("introspect_error", error="missing_token")
+            return oauth_error("invalid_request", "Missing token parameter.", 400)
+
+        # Require client authentication
+        auth = extract_client_auth(request)
+        if "error" in auth:
+            code, desc = auth["error"]
+            return oauth_error(code, desc, 401)
+
+        client_id = auth.get("client_id")
+        client_secret = auth.get("client_secret")
+
+        if not client_id:
+            log.warning("introspect_error", error="missing_client_id")
+            return oauth_error("invalid_client", "Missing client_id.", 401)
+
+        # Try to decode the token
+        try:
+            pub_key = load_public_key_from_cert_or_key(config.signing_cert_pem)
+            claims = pyjwt.decode(
+                token,
+                pub_key,
+                algorithms=["RS256"],
+                options={"verify_aud": False},
+            )
+        except pyjwt.ExpiredSignatureError:
+            # Expired tokens return active: false, not an error
+            log.info("introspect_inactive", reason="expired_token")
+            return jsonify({"active": False}), 200
+        except Exception:
+            # Invalid/malformed tokens return active: false, not an error
+            log.info("introspect_inactive", reason="invalid_token")
+            return jsonify({"active": False}), 200
+
+        # Token is valid and active
+        response = {
+            "active": True,
+            "sub": claims.get("sub"),
+            "scope": claims.get("scope"),
+            "client_id": claims.get("aud"),
+            "exp": claims.get("exp"),
+            "iat": claims.get("iat"),
+            "token_type": "Bearer",
+            "jti": claims.get("jti"),
+        }
+
+        log.info("introspect_success", client_id=client_id, sub=response.get("sub"))
+        return jsonify(response), 200
+
+    @app.route("/revoke", methods=["POST"])
+    def revoke():
+        """RFC 7009: Token Revocation endpoint.
+
+        Returns empty 200 response for any input (no error responses per spec).
+        """
+        token = request.form.get("token")
+        token_type_hint = request.form.get("token_type_hint")
+
+        # Require client authentication
+        auth = extract_client_auth(request)
+        if "error" in auth:
+            # Per RFC 7009, return 401 if client auth fails
+            code, desc = auth["error"]
+            return oauth_error(code, desc, 401)
+
+        client_id = auth.get("client_id")
+        if not client_id:
+            # Per RFC 7009, return 401 if no client_id
+            return oauth_error("invalid_client", "Missing client_id.", 401)
+
+        # If no token, still return 200 (per spec, silently ignore)
+        if not token:
+            log.info("revoke_no_token", client_id=client_id)
+            return "", 200
+
+        # Try to decode token to get jti (for refresh tokens)
+        try:
+            pub_key = load_public_key_from_cert_or_key(config.signing_cert_pem)
+            claims = pyjwt.decode(
+                token,
+                pub_key,
+                algorithms=["RS256"],
+                options={"verify_aud": False},
+            )
+            jti = claims.get("jti")
+            if jti and token_type_hint != "access_token":
+                # Try to revoke the refresh token
+                was_revoked = store.revoke_refresh(jti)
+                log.info(
+                    "revoke_token",
+                    client_id=client_id,
+                    jti=jti,
+                    was_revoked=was_revoked,
+                )
+        except Exception:
+            # Invalid token - still return 200 per spec
+            log.info("revoke_invalid_token", client_id=client_id)
+
+        # Always return empty 200 response per RFC 7009
+        return "", 200
 
     return app
