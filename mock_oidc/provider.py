@@ -66,7 +66,7 @@ def create_app(config: AppConfig) -> Flask:
     # Request ID middleware
     @app.before_request
     def _before_request():
-        request_id = request.headers.get("X-Request-ID", secrets.token_hex(8))
+        request_id = request.headers.get("X-Request-ID") or secrets.token_hex(8)
         g.request_id = request_id
         structlog.contextvars.clear_contextvars()
         structlog.contextvars.bind_contextvars(request_id=request_id)
@@ -164,6 +164,11 @@ def create_app(config: AppConfig) -> Flask:
         if not username or not password:
             return make_response("Missing username/password", 400)
 
+        # Validate required parameters
+        redirect_uri = request.form.get("redirect_uri")
+        if not redirect_uri:
+            return make_response("Missing redirect_uri parameter", 400)
+
         # If users config is loaded, verify username is known
         if config.users and username not in config.users:
             log.warning(
@@ -233,6 +238,9 @@ def create_app(config: AppConfig) -> Flask:
     def token():
         grant_type = request.form.get("grant_type")
 
+        if not grant_type:
+            return oauth_error("invalid_request", "Missing grant_type parameter.", 400)
+
         auth = extract_client_auth(request)
         if "error" in auth:
             code, desc = auth["error"]
@@ -243,6 +251,15 @@ def create_app(config: AppConfig) -> Flask:
 
         if grant_type == "authorization_code":
             code_val = request.form.get("code")
+            if not code_val:
+                log.warning(
+                    "token_error",
+                    grant_type=grant_type,
+                    error="invalid_request",
+                    detail="missing_code",
+                    client_id=provided_client_id,
+                )
+                return oauth_error("invalid_request", "Missing code parameter.", 400)
             data = store.pop_code(code_val)
             if not data:
                 log.warning(
@@ -353,6 +370,12 @@ def create_app(config: AppConfig) -> Flask:
 
             scope = request.form.get("scope") or data["scope"]
 
+            # Get user claims if this user is in the config
+            user_claims = None
+            username = data.get("username")
+            if username and config.users and username in config.users:
+                user_claims = config.users[username]
+
             tokens = issue_tokens(
                 client_id=client_id,
                 scope=scope,
@@ -361,6 +384,8 @@ def create_app(config: AppConfig) -> Flask:
                 store=store,
                 config=config,
                 nonce=data.get("nonce"),
+                user_claims=user_claims,
+                username=username,
             )
 
             # Log successful token issuance
@@ -501,6 +526,12 @@ def create_app(config: AppConfig) -> Flask:
                     )
                 scope = " ".join(sorted(requested))
 
+            # Get user claims if available from refresh entry
+            user_claims = None
+            username = entry.get("username")
+            if username and config.users and username in config.users:
+                user_claims = config.users[username]
+
             tokens = issue_tokens(
                 client_id=client_id,
                 scope=scope,
@@ -508,6 +539,8 @@ def create_app(config: AppConfig) -> Flask:
                 iss=current_issuer(),
                 store=store,
                 config=config,
+                user_claims=user_claims,
+                username=username,
             )
 
             # Log successful token issuance from refresh
@@ -691,27 +724,37 @@ def create_app(config: AppConfig) -> Flask:
 
         scope_set = set(claims.get("scope", "").split()) if claims.get("scope") else set()
         sub = claims.get("sub")
+        username = claims.get("username")
         response_claims = {"sub": sub}
 
-        # Check if we have user claims from config (for non-client_credentials flows)
-        # User claims were merged into ID token during issue_tokens, so we check that path
-        # For now, return claims that were in the token itself (they came from user config)
-        # Plus add claims based on scopes
-        if "profile" in scope_set:
-            if "name" in claims:
-                response_claims["name"] = claims["name"]
-            else:
-                response_claims["name"] = "Max Musterman"
-        if "email" in scope_set:
-            if "email" in claims:
-                response_claims["email"] = claims["email"]
-            else:
-                response_claims["email"] = "max@example.com"
+        # Look up user claims from config if username is present
+        user_claims = None
+        if username and config.users and username in config.users:
+            user_claims = config.users[username]
 
-        # Add any custom claims that were in the token
-        for key in claims:
-            if key not in ("sub", "iss", "aud", "iat", "exp", "nbf", "name", "email", "nonce", "at_hash", "scope", "jti", "typ"):
-                response_claims[key] = claims[key]
+        # Add profile and email claims
+        if "profile" in scope_set or "email" in scope_set:
+            if user_claims:
+                if "profile" in scope_set and "name" in user_claims:
+                    response_claims["name"] = user_claims["name"]
+                if "email" in scope_set and "email" in user_claims:
+                    response_claims["email"] = user_claims["email"]
+            else:
+                if "profile" in scope_set:
+                    response_claims["name"] = claims.get("name", "Max Musterman")
+                if "email" in scope_set:
+                    response_claims["email"] = claims.get("email", "max@example.com")
+
+        # Add custom claims from user config (for any scope)
+        if user_claims:
+            for key, value in user_claims.items():
+                if key not in ("name", "email"):
+                    response_claims[key] = value
+        else:
+            # Add any custom claims that were in the token itself
+            for key in claims:
+                if key not in ("sub", "iss", "aud", "iat", "exp", "nbf", "name", "email", "nonce", "at_hash", "scope", "jti", "typ", "username"):
+                    response_claims[key] = claims[key]
 
         return jsonify(response_claims), 200
 

@@ -33,9 +33,10 @@ def compute_hash_claim(token_value: str) -> str:
     return base64url_no_pad(left_half)
 
 
-def issue_tokens(client_id: str, scope: str, sub: str, iss: str, store, config, nonce: str = None) -> dict:
+def issue_tokens(client_id: str, scope: str, sub: str, iss: str, store, config, nonce: str = None, user_claims: dict = None, username: str = None) -> dict:
     """Issue access, ID, and refresh tokens."""
     iat = now_ts()
+    access_jti = secrets.token_hex(16)
     refresh_jti = secrets.token_hex(16)
 
     access_claims = {
@@ -46,7 +47,10 @@ def issue_tokens(client_id: str, scope: str, sub: str, iss: str, store, config, 
         "nbf": iat,
         "exp": ts_plus(config.access_token_ttl),
         "scope": scope,
+        "jti": access_jti,
     }
+    if username:
+        access_claims["username"] = username
     id_claims = {
         "sub": sub,
         "iss": iss,
@@ -59,6 +63,8 @@ def issue_tokens(client_id: str, scope: str, sub: str, iss: str, store, config, 
     }
     if nonce:
         id_claims["nonce"] = nonce
+    if user_claims:
+        id_claims.update(user_claims)
 
     refresh_claims = {
         "sub": sub,
@@ -76,15 +82,15 @@ def issue_tokens(client_id: str, scope: str, sub: str, iss: str, store, config, 
     at_hash = compute_hash_claim(access_token)
     id_claims["at_hash"] = at_hash
 
-    store.put_refresh(
-        refresh_jti,
-        {
-            "client_id": client_id,
-            "scope": scope,
-            "sub": sub,
-            "exp": now_utc() + timedelta(seconds=config.refresh_ttl),
-        },
-    )
+    refresh_entry = {
+        "client_id": client_id,
+        "scope": scope,
+        "sub": sub,
+        "exp": now_utc() + timedelta(seconds=config.refresh_ttl),
+    }
+    if username:
+        refresh_entry["username"] = username
+    store.put_refresh(refresh_jti, refresh_entry)
 
     return {
         "access_token": access_token,
