@@ -1,97 +1,182 @@
 # Mock OIDC Identity Provider (Python, Flask)
 
-This project provides a that implements a mock OpenID Connect (OIDC) Identity Provider.
-It is designed for testing OIDC client integrations and supports the Authorization Code Flow, token refresh, and optional PKCE.
+A feature-rich, spec-compliant mock OpenID Connect (OIDC) / OAuth2 Identity Provider for testing client integrations.
+
+Perfect for:
+- Testing OIDC/OAuth2 client implementations
+- Integration testing of applications requiring an identity provider
+- Developing and debugging authentication flows
+- Learning OIDC/OAuth2 concepts
 
 ---
 
 ## Features
 
-* `/authorize` endpoint with a simple login form (username/password + scope).
-* `/token` endpoint with support for:
+### Core Flows
+* **Authorization Code Flow** — with optional PKCE support
+* **Refresh Token Flow** — single-use rotating refresh tokens
+* **Client Credentials Flow** — for machine-to-machine authentication
+* **PKCE Support** (optional) — Proof Key for Public Clients
+  * S256 (recommended) and plain methods supported
+  * Enable with `--pkce` flag
 
-  * `grant_type=authorization_code`
-  * `grant_type=refresh_token` (always rotates refresh tokens, single-use).
-* **Optional PKCE support**:
+### OIDC Compliance
+* **Spec-compliant tokens** — RS256-signed JWTs with RFC7519-compliant timestamps
+* **Stable `sub` claim** — deterministic per user (hash-based, survives server restarts)
+* **`at_hash` in ID tokens** — OIDC Core Section 3.3.2.11 compliance
+* **Proper scope handling** — scope narrowing allowed on refresh, widening denied
+* **`redirect_uri` validation** — matched between authorize and token endpoints
 
-  * Disabled by default.
-  * Enable with `--pkce` flag.
-  * Accepts `code_challenge` and `code_challenge_method` during `/authorize`.
-  * Enforces `code_verifier` during `/token` exchange.
-  * Supports `S256` (preferred) and `plain` methods.
-* `.well-known/openid-configuration` discovery endpoint.
-* `/jwks.json` endpoint exposing the signing key in JWK format.
-* JWT-based tokens (`RS256`) with **RFC7519-compliant timestamps** (`iat`, `nbf`, `exp` are seconds since epoch).
-* Configurable TTLs for:
+### Endpoints
+* **`/authorize`** — Authorization endpoint with built-in login form
+* **`/token`** — Token endpoint supporting authorization_code, refresh_token, and client_credentials grants
+* **`/userinfo`** — OIDC UserInfo endpoint with scope-based claim filtering
+* **`/introspect`** — RFC 7662 token introspection endpoint
+* **`/revoke`** — RFC 7009 token revocation endpoint
+* **`/.well-known/openid-configuration`** — OIDC discovery document
+* **`/jwks.json`** — JSON Web Key Set (JWKS) for token verification
 
-  * Authorization codes
-  * Access tokens
-  * ID tokens
-  * Refresh tokens
-* ID Token includes hardcoded claims:
+### Configuration & Customization
+* **Configurable TTLs** — authorization codes, access tokens, ID tokens, refresh tokens
+* **User configuration** — load users from JSON file with custom claims (name, email, groups, etc.)
+* **Client configuration** — load client definitions with allowed grants and redirect URIs
+* **Custom issuer** — override default issuer URI
+* **SSL/TLS support** — provide your own certs or generate ephemeral self-signed certs
+* **Structured logging** — both text and JSON output formats
 
-  * `name: "Max Musterman"`
-  * `email: "max@example.com"`
-* Support for SSL:
-
-  * Provide your own `--ssl-cert/--ssl-key`
-  * Or generate ephemeral self-signed certs with `--ssl-quickboot`.
-* Optionally override the `issuer` value with `--issuer`.
+### Token Features
+* **Stable subject identifiers** — `sub` claim is deterministic per user
+* **Custom claims** — support for custom user claims (groups, departments, etc.)
+* **Single-use refresh tokens** — rotated on every exchange
+* **Request ID tracking** — X-Request-ID header support for debugging
+* **Thread-safe operations** — safe for concurrent integration testing
 
 ---
 
 ## Requirements
 
-* Python 3.8+
-* Dependencies:
+* Python 3.10+
+* Dependencies (auto-installed):
+  * `flask>=3.0` — web framework
+  * `pyjwt>=2.8` — JWT signing and verification
+  * `cryptography>=42` — RSA key generation and X.509 certificates
+  * `structlog>=24` — structured logging (optional)
 
-  * `flask`
-  * `pyjwt`
-  * `cryptography`
+### Installation
 
-Install dependencies (using `uv` or pip):
+**Option 1: Install as a package (recommended)**
 
 ```bash
-# With uv
-uv venv .venv
-source .venv/bin/activate
-uv pip install flask pyjwt cryptography
+pip install -e ".[dev]"  # Development mode with test dependencies
+# or
+pip install .            # Production installation
+```
 
-# Or with pip
-pip install flask pyjwt cryptography
+**Option 2: Install dependencies manually**
+
+```bash
+pip install flask pyjwt cryptography structlog pytest pytest-flask
+```
+
+**Option 3: Using `uv` (fast Python package manager)**
+
+```bash
+uv sync --extra dev  # Install with dev dependencies
+# or
+uv pip install flask pyjwt cryptography
 ```
 
 ---
 
-## Usage
+## Getting Started
 
-Run the server:
+### Quick Start (5 seconds)
 
 ```bash
-python mock_oidc.py [options]
+python -m mock_oidc --ssl-quickboot
+```
+
+This starts the IdP at `https://localhost:4567` with ephemeral certs. Open in browser:
+
+```
+https://localhost:4567/authorize?response_type=code&client_id=test-client&redirect_uri=https://localhost:4567/callback&scope=openid%20email&state=abc123
+```
+
+### Run Tests
+
+```bash
+pytest tests/ -v          # Run all tests
+pytest tests/ --cov       # With coverage report
+```
+
+Currently: **110+ tests passing**, covering all major flows and edge cases.
+
+## Usage
+
+Run the identity provider:
+
+```bash
+python -m mock_oidc [options]
 ```
 
 ### CLI Options
 
-| Flag                 | Description                                             |
-| -------------------- | ------------------------------------------------------- |
-| `--help`             | Show help message                                       |
-| `--port PORT`        | Port to run on (default: 4567)                          |
-| `--auth-code-ttl`    | TTL (seconds) for authorization codes (default: 300)    |
-| `--access-token-ttl` | TTL (seconds) for access tokens (default: 3600)         |
-| `--id-token-ttl`     | TTL (seconds) for ID tokens (default: 3600)             |
-| `--refresh-ttl`      | TTL (seconds) for refresh tokens (default: 50400 = 14h) |
-| `--cert FILE`        | Certificate (PEM) for token signing                     |
-| `--key FILE`         | Private key (PEM) for token signing                     |
-| `--ssl-cert FILE`    | SSL certificate for HTTPS service                       |
-| `--ssl-key FILE`     | SSL private key for HTTPS service                       |
-| `--ssl-quickboot`    | Generate ephemeral SSL + signing certs in memory        |
-| `--issuer URL`       | Override issuer string (default: inferred from request) |
-| `--pkce`             | Enable PKCE support (default: disabled)                 |
+| Flag | Description | Default |
+|------|-------------|---------|
+| `--port PORT` | Port to listen on | `4567` |
+| `--auth-code-ttl SEC` | Authorization code TTL | `300` |
+| `--access-token-ttl SEC` | Access token TTL | `3600` |
+| `--id-token-ttl SEC` | ID token TTL | `3600` |
+| `--refresh-ttl SEC` | Refresh token TTL | `50400` (14h) |
+| `--issuer URI` | Override issuer URI | Auto-inferred from request |
+| `--pkce` | Require PKCE for public clients | Disabled |
+| `--cert FILE` | Token signing certificate (PEM) | Generate ephemeral |
+| `--key FILE` | Token signing private key (PEM) | Generate ephemeral |
+| `--ssl-cert FILE` | Service HTTPS certificate | HTTP only |
+| `--ssl-key FILE` | Service HTTPS private key | HTTP only |
+| `--ssl-quickboot` | Generate ephemeral SSL certs | Disabled |
+| `--users FILE` | User definitions (JSON) | Accept all users |
+| `--clients FILE` | Client definitions (JSON) | Accept all clients |
 
 ---
 
-## Example: Start with Ephemeral SSL
+## User Configuration
+
+Define users with custom claims using a JSON file:
+
+```json
+{
+  "alice@example.com": {
+    "name": "Alice Smith",
+    "email": "alice@example.com",
+    "groups": ["admin", "engineers"],
+    "department": "Engineering"
+  },
+  "bob@example.com": {
+    "name": "Bob Jones",
+    "email": "bob@example.com",
+    "groups": ["readers"]
+  }
+}
+```
+
+Then run:
+
+```bash
+python -m mock_oidc --users users.json
+```
+
+With this config:
+- Only `alice@example.com` and `bob@example.com` can authenticate
+- Unknown users get HTTP 400 response
+- Custom claims appear in ID tokens and `/userinfo` responses
+- Discovery document (`/.well-known/openid-configuration`) lists all available claims
+
+---
+
+## Examples
+
+### Example 1: Start with Ephemeral SSL
 
 ```bash
 python mock_oidc.py --ssl-quickboot --port 8443
@@ -183,48 +268,180 @@ curl -X POST http://localhost:8080/token \
   -d "client_id=test-client"
 ```
 
+### Example 5: Machine-to-Machine (Client Credentials Flow)
+
+For service-to-service authentication, use client_credentials grant:
+
+```bash
+curl -X POST http://localhost:8080/token \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -d "grant_type=client_credentials" \
+  -d "client_id=service-worker" \
+  -d "client_secret=my-secret" \
+  -d "scope=api:read api:write"
+```
+
+Response (access token only, no ID token or refresh token):
+
+```json
+{
+  "access_token": "eyJ0eXAiOiJKV1QiLCJhbGc...",
+  "token_type": "Bearer",
+  "expires_in": 3600,
+  "scope": "api:read api:write"
+}
+```
+
+### Example 6: Token Introspection (RFC 7662)
+
+Check if a token is valid:
+
+```bash
+curl -X POST http://localhost:8080/introspect \
+  -u "client_id:client_secret" \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -d "token=eyJ0eXAiOiJKV1QiLCJhbGc..."
+```
+
+Response (valid token):
+
+```json
+{
+  "active": true,
+  "sub": "user:abc123def456",
+  "scope": "openid email",
+  "client_id": "test-client",
+  "exp": 1234567890,
+  "iat": 1234564290,
+  "token_type": "Bearer",
+  "jti": "token-jti-value"
+}
+```
+
+### Example 7: Token Revocation (RFC 7009)
+
+Revoke a refresh token:
+
+```bash
+curl -X POST http://localhost:8080/revoke \
+  -u "client_id:client_secret" \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -d "token=eyJ0eXAiOiJKV1QiLCJhbGc..."
+```
+
+Response: `200 OK` (empty body, per RFC 7009 spec)
+
+### Example 8: UserInfo Endpoint (OIDC Core 5.3)
+
+Get authenticated user information:
+
+```bash
+curl -H "Authorization: Bearer $ACCESS_TOKEN" \
+  http://localhost:8080/userinfo
+```
+
+Response (claims based on access token scope):
+
+```json
+{
+  "sub": "user:abc123def456",
+  "name": "Alice Smith",
+  "email": "alice@example.com"
+}
+```
+
 ---
 
-## Endpoints
+## All Endpoints
 
-* **`/authorize`** — Presents login form and issues authorization codes.
-* **`/token`** — Exchanges auth code or refresh token for tokens. Enforces PKCE when enabled.
-* **`/.well-known/openid-configuration`** — OIDC discovery document.
-* **`/jwks.json`** — Public key (RSA, JWK format).
+| Endpoint | Method | Auth | Purpose |
+|----------|--------|------|---------|
+| `/authorize` | GET, POST | — | Authorization endpoint with login form |
+| `/token` | POST | Client auth | Token endpoint (code, refresh, client_credentials) |
+| `/userinfo` | GET, POST | Bearer | Get authenticated user claims |
+| `/introspect` | POST | Client auth | Introspect token validity (RFC 7662) |
+| `/revoke` | POST | Client auth | Revoke refresh token (RFC 7009) |
+| `/.well-known/openid-configuration` | GET | — | OIDC discovery document |
+| `/jwks.json` | GET | — | JSON Web Key Set for verification |
+| `/callback` | GET | — | Debug endpoint showing auth code (useful in browser testing) |
 
 ---
 
-## Tokens
+## Token Format
 
-All tokens are JWTs signed with RS256.
+All tokens are **JWTs signed with RS256**, issued in compliance with OIDC Core and OAuth 2.0 specs.
 
 ### Access Token
 
-Claims:
+Standard OAuth 2.0 access token. Claims:
 
-* `sub`, `iss`, `aud`, `iat`, `nbf`, `exp`, `scope`
+* `sub` — unique, stable user identifier (hash-based, deterministic per username)
+* `iss` — issuer URI
+* `aud` — client_id
+* `iat`, `nbf`, `exp` — issued-at, not-before, expiration timestamps (seconds since epoch)
+* `scope` — space-delimited scopes granted
+* `jti` — unique token identifier
+
+**Client Credentials Flow** access tokens have:
+* `sub` = `client_id` (machine identity)
 
 ### ID Token
 
-Claims:
+OIDC Core-compliant ID token. Always includes:
 
-* `sub`, `iss`, `aud`, `iat`, `nbf`, `exp`
-* `name: "Max Musterman"`
-* `email: "max@example.com"`
+* `sub` — stable user identifier (same as in access token within a user session)
+* `iss` — issuer URI
+* `aud` — client_id
+* `iat`, `nbf`, `exp` — timestamps
+* `nonce` — if provided in authorization request
+* **`at_hash`** — hash of accompanying access token (OIDC Core 3.3.2.11 requirement)
+
+And from scopes:
+
+* `name`, `email` — if `profile` or `email` scopes requested
+* Custom claims — if configured via `--users` JSON file (e.g., `groups`, `department`)
 
 ### Refresh Token
 
-Claims:
+Single-use refresh token with rotation. Claims:
 
-* `sub`, `iss`, `aud`, `iat`, `nbf`, `exp`, `jti`, `typ="refresh"`
-* Single-use (rotated on each exchange)
+* `sub` — user identifier
+* `iss`, `aud` — issuer and client_id
+* `iat`, `nbf`, `exp` — timestamps
+* `jti` — unique token identifier (used for single-use enforcement and revocation)
+* `typ` — "refresh"
+
+**Single-use enforcement:** Each refresh token can only be exchanged once. A new refresh token is issued on each exchange.
 
 ---
 
-## Notes
+## Project Maturity
 
-* This is **not production-ready**.
-* For **local testing only**.
-* No real user database (any non-empty username/password works).
-* No client registration enforcement (any `client_id` is accepted).
-* PKCE is optional: enable with `--pkce` to test clients that require code challenge/verification.
+**Phases Implemented:**
+- ✅ **Phase 1 (Foundation):** Package structure, testability, no side effects on import
+- ✅ **Phase 2 (Correctness):** Stable `sub`, `/userinfo`, `at_hash`, proper PKCE, redirect_uri validation
+- ✅ **Phase 3 (Capability):** `/introspect`, `/revoke`, `client_credentials`, user config, client config
+- ✅ **Phase 4 (Robustness):** Thread-safe TokenStore, TTL eviction, structured logging, request IDs
+- 🚧 **Phase 5+ (Testing, Deployment, Observability):** In progress
+
+**Test Coverage:** 110+ tests across all major flows and edge cases
+
+### Limitations
+
+* **Not production-ready** — for local testing and development only
+* **No real user database** — uses in-memory store with optional JSON config
+* **No persistent storage** — tokens and codes are lost on restart
+* **No client registration** — any client_id is accepted (unless --clients config is provided)
+* **Ephemeral keys by default** — signing keys are generated on each restart (provide --cert/--key to persist)
+
+### Perfect For
+
+- 🧪 Integration testing OIDC/OAuth2 clients
+- 📚 Learning OIDC/OAuth2 concepts
+- 🔍 Debugging authentication flows
+- 📱 Testing mobile app integrations
+- 🚀 Rapid prototyping of auth-dependent features
+
+## Contributing
+
+This is an educational/development tool. Issues and improvements welcome!
