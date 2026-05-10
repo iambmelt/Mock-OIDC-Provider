@@ -1,22 +1,77 @@
 import base64
+import logging
 import secrets
+import structlog
+import threading
 from datetime import timedelta
 from urllib.parse import urlencode, urlparse, parse_qsl, urlunparse
 
 import jwt as pyjwt
-from flask import Flask, jsonify, make_response, redirect, render_template, request
+from flask import Flask, g, jsonify, make_response, redirect, render_template, request
 
 from mock_oidc.config import AppConfig
-from mock_oidc.crypto import jwks_dict
-from mock_oidc.store import SimpleStore
+from mock_oidc.crypto import jwks_dict, load_public_key_from_cert_or_key
+from mock_oidc.store import TokenStore
 from mock_oidc.tokens import issue_tokens, now_utc, validate_pkce
 
 
 def create_app(config: AppConfig) -> Flask:
     app = Flask(__name__, template_folder="templates")
-    store = SimpleStore()
+    store = TokenStore()
     app.config["MOCK_OIDC_CONFIG"] = config
     app.config["MOCK_OIDC_STORE"] = store
+
+    # Configure structlog based on config
+    if config.log_format == "json":
+        structlog.configure(
+            processors=[
+                structlog.contextvars.merge_contextvars,
+                structlog.processors.TimeStamper(fmt="iso"),
+                structlog.processors.JSONRenderer(),
+            ],
+            logger_factory=structlog.PrintLoggerFactory(),
+        )
+    else:
+        structlog.configure(
+            processors=[
+                structlog.contextvars.merge_contextvars,
+                structlog.dev.ConsoleRenderer(),
+            ],
+        )
+
+    # Set log level
+    logging.basicConfig(level=getattr(logging, config.log_level.upper(), logging.INFO))
+    log = structlog.get_logger()
+
+    # Start background TTL eviction thread if enabled
+    if config.eviction_interval > 0:
+        def _evict_loop():
+            while True:
+                import time
+                time.sleep(config.eviction_interval)
+                codes_evicted, refresh_evicted = store.evict_expired()
+                if codes_evicted > 0 or refresh_evicted > 0:
+                    log.info(
+                        "store_eviction",
+                        codes_evicted=codes_evicted,
+                        refresh_evicted=refresh_evicted,
+                    )
+
+        evict_thread = threading.Thread(target=_evict_loop, daemon=True)
+        evict_thread.start()
+
+    # Request ID middleware
+    @app.before_request
+    def _before_request():
+        request_id = request.headers.get("X-Request-ID", secrets.token_hex(8))
+        g.request_id = request_id
+        structlog.contextvars.clear_contextvars()
+        structlog.contextvars.bind_contextvars(request_id=request_id)
+
+    @app.after_request
+    def _after_request(response):
+        response.headers["X-Request-ID"] = g.request_id
+        return response
 
     def current_issuer() -> str:
         if config.issuer:
@@ -99,22 +154,35 @@ def create_app(config: AppConfig) -> Flask:
             return make_response("Missing username/password", 400)
 
         code = secrets.token_hex(16)
+        client_id = request.form.get("client_id")
+        scope = request.form.get("scope") or "openid"
         entry = {
-            "client_id": request.form.get("client_id"),
+            "client_id": client_id,
             "redirect_uri": request.form.get("redirect_uri"),
-            "scope": request.form.get("scope") or "openid",
+            "scope": scope,
             "exp": now_utc() + timedelta(seconds=config.auth_code_ttl),
             "nonce": request.form.get("nonce") or None,
         }
 
+        pkce_method = None
         if config.pkce:
             cc = request.form.get("code_challenge")
             ccm = request.form.get("code_challenge_method") or "plain"
             if cc:
                 entry["code_challenge"] = cc
                 entry["code_challenge_method"] = ccm
+                pkce_method = ccm
 
         store.put_code(code, entry)
+
+        # Log authorization code issuance
+        log.info(
+            "authorize_code_issued",
+            sub=code,
+            client_id=client_id,
+            scope=scope,
+            pkce_method=pkce_method,
+        )
 
         ru = urlparse(entry["redirect_uri"])
         q = dict(parse_qsl(ru.query))
@@ -144,15 +212,36 @@ def create_app(config: AppConfig) -> Flask:
             code_val = request.form.get("code")
             data = store.pop_code(code_val)
             if not data:
+                log.warning(
+                    "token_error",
+                    grant_type=grant_type,
+                    error="invalid_grant",
+                    detail="code_invalid_or_used",
+                    client_id=provided_client_id,
+                )
                 return oauth_error(
                     "invalid_grant",
                     "Authorization code is invalid, already used, or was not issued by this server.",
                 )
             if now_utc() > data["exp"]:
+                log.warning(
+                    "token_error",
+                    grant_type=grant_type,
+                    error="invalid_grant",
+                    detail="code_expired",
+                    client_id=provided_client_id,
+                )
                 return oauth_error("invalid_grant", "Authorization code has expired.")
 
             client_id = provided_client_id or data["client_id"]
             if provided_client_id and provided_client_id != data["client_id"]:
+                log.warning(
+                    "token_error",
+                    grant_type=grant_type,
+                    error="invalid_grant",
+                    detail="client_mismatch",
+                    client_id=provided_client_id,
+                )
                 return oauth_error("invalid_grant", "Code was issued to a different client.")
 
             must_validate_pkce = False
@@ -167,18 +256,53 @@ def create_app(config: AppConfig) -> Flask:
                 except ValueError as e:
                     msg = str(e)
                     if msg == "pkce_required":
+                        log.warning(
+                            "token_error",
+                            grant_type=grant_type,
+                            error="invalid_request",
+                            detail="pkce_required",
+                            client_id=client_id,
+                        )
                         return oauth_error(
                             "invalid_request",
                             "PKCE required but no code_challenge associated with this code.",
                         )
                     if msg == "missing_code_verifier":
+                        log.warning(
+                            "token_error",
+                            grant_type=grant_type,
+                            error="invalid_request",
+                            detail="missing_code_verifier",
+                            client_id=client_id,
+                        )
                         return oauth_error("invalid_request", "Missing code_verifier.")
                     if msg == "invalid_code_verifier":
+                        log.warning(
+                            "token_error",
+                            grant_type=grant_type,
+                            error="invalid_grant",
+                            detail="invalid_code_verifier",
+                            client_id=client_id,
+                        )
                         return oauth_error("invalid_grant", "Invalid code_verifier.")
                     if msg == "unsupported_challenge_method":
+                        log.warning(
+                            "token_error",
+                            grant_type=grant_type,
+                            error="invalid_request",
+                            detail="unsupported_challenge_method",
+                            client_id=client_id,
+                        )
                         return oauth_error(
                             "invalid_request", "Unsupported code_challenge_method."
                         )
+                    log.warning(
+                        "token_error",
+                        grant_type=grant_type,
+                        error="invalid_request",
+                        detail="pkce_validation_failed",
+                        client_id=client_id,
+                    )
                     return oauth_error("invalid_request", "PKCE validation failed.")
 
             scope = request.form.get("scope") or data["scope"]
@@ -190,21 +314,59 @@ def create_app(config: AppConfig) -> Flask:
                 config=config,
                 nonce=data.get("nonce"),
             )
+
+            # Log successful token issuance
+            id_token = tokens.get("id_token")
+            try:
+                pub_key = load_public_key_from_cert_or_key(config.signing_cert_pem)
+                id_claims = pyjwt.decode(
+                    id_token,
+                    pub_key,
+                    algorithms=["RS256"],
+                    options={"verify_aud": False},
+                )
+                sub = id_claims.get("sub", "unknown")
+            except Exception:
+                sub = "unknown"
+
+            log.info(
+                "token_issued",
+                grant_type=grant_type,
+                client_id=client_id,
+                scope=scope,
+                sub=sub,
+            )
+
             return jsonify(tokens), 200
 
         elif grant_type == "refresh_token":
             refresh_token = request.form.get("refresh_token")
             if not refresh_token:
+                log.warning(
+                    "token_error",
+                    grant_type=grant_type,
+                    error="invalid_request",
+                    detail="missing_refresh_token",
+                    client_id=provided_client_id,
+                )
                 return oauth_error("invalid_request", "Missing refresh_token.")
 
             try:
+                pub_key = load_public_key_from_cert_or_key(config.signing_cert_pem)
                 decoded = pyjwt.decode(
                     refresh_token,
-                    config.signing_cert_pem,
+                    pub_key,
                     algorithms=["RS256"],
                     options={"verify_aud": False},
                 )
             except Exception:
+                log.warning(
+                    "token_error",
+                    grant_type=grant_type,
+                    error="invalid_grant",
+                    detail="malformed_or_invalid_signature",
+                    client_id=provided_client_id,
+                )
                 return oauth_error(
                     "invalid_grant",
                     "Refresh token is malformed or has an invalid signature.",
@@ -212,21 +374,49 @@ def create_app(config: AppConfig) -> Flask:
 
             jti = decoded.get("jti")
             if not jti:
+                log.warning(
+                    "token_error",
+                    grant_type=grant_type,
+                    error="invalid_grant",
+                    detail="no_jti",
+                    client_id=provided_client_id,
+                )
                 return oauth_error(
                     "invalid_grant", "Refresh token has been revoked or already used."
                 )
 
             entry = store.pop_refresh(jti)
             if not entry:
+                log.warning(
+                    "token_error",
+                    grant_type=grant_type,
+                    error="invalid_grant",
+                    detail="refresh_revoked_or_used",
+                    client_id=provided_client_id,
+                )
                 return oauth_error(
                     "invalid_grant", "Refresh token has been revoked or already used."
                 )
 
             if now_utc() > entry["exp"]:
+                log.warning(
+                    "token_error",
+                    grant_type=grant_type,
+                    error="invalid_grant",
+                    detail="refresh_expired",
+                    client_id=provided_client_id,
+                )
                 return oauth_error("invalid_grant", "Refresh token has expired.")
 
             client_id = provided_client_id or entry["client_id"]
             if provided_client_id and provided_client_id != entry["client_id"]:
+                log.warning(
+                    "token_error",
+                    grant_type=grant_type,
+                    error="invalid_grant",
+                    detail="client_mismatch",
+                    client_id=provided_client_id,
+                )
                 return oauth_error("invalid_grant", "Refresh token audience mismatch.")
 
             scope = entry["scope"]
@@ -235,6 +425,13 @@ def create_app(config: AppConfig) -> Flask:
                 requested = set(req_scope.split())
                 original = set(scope.split())
                 if not requested.issubset(original):
+                    log.warning(
+                        "token_error",
+                        grant_type=grant_type,
+                        error="invalid_scope",
+                        detail="scope_expansion",
+                        client_id=client_id,
+                    )
                     return oauth_error(
                         "invalid_scope",
                         "Requested scope expands the original scope; only narrowing is allowed.",
@@ -248,9 +445,39 @@ def create_app(config: AppConfig) -> Flask:
                 store=store,
                 config=config,
             )
+
+            # Log successful token issuance from refresh
+            id_token = tokens.get("id_token")
+            try:
+                pub_key = load_public_key_from_cert_or_key(config.signing_cert_pem)
+                id_claims = pyjwt.decode(
+                    id_token,
+                    pub_key,
+                    algorithms=["RS256"],
+                    options={"verify_aud": False},
+                )
+                sub = id_claims.get("sub", "unknown")
+            except Exception:
+                sub = "unknown"
+
+            log.info(
+                "token_issued",
+                grant_type=grant_type,
+                client_id=client_id,
+                scope=scope,
+                sub=sub,
+            )
+
             return jsonify(tokens), 200
 
         else:
+            log.warning(
+                "token_error",
+                grant_type=grant_type,
+                error="unsupported_grant_type",
+                detail="unsupported",
+                client_id=provided_client_id,
+            )
             return oauth_error(
                 "unsupported_grant_type",
                 "Grant type must be 'authorization_code' or 'refresh_token'.",

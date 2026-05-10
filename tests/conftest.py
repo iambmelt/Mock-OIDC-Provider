@@ -93,3 +93,27 @@ def exchange_code(
 def decode_jwt(token_str):
     """Decode JWT without verification for assertion testing."""
     return pyjwt.decode(token_str, options={"verify_signature": False})
+
+
+def concurrent_exchange_code(client, code, num_requests=5):
+    """Helper to test concurrent code exchange attempts.
+
+    Returns a list of response tuples (status_code, json_data or None).
+    """
+    import threading
+
+    results = []
+    lock = threading.Lock()
+
+    def exchange():
+        resp = exchange_code(client, code)
+        with lock:
+            results.append((resp.status_code, resp.get_json() if resp.status_code == 200 else None))
+
+    threads = [threading.Thread(target=exchange) for _ in range(num_requests)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    return results
