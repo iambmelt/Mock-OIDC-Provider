@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Callback</title>
+    <style>
+      body { font-family: -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif; background: #f7f7f7; padding: 2rem; }
+      .box { max-width: 520px; margin: 0 auto; background: #fff; border-radius: 12px; padding: 1.25rem 1.5rem; box-shadow: 0 4px 24px rgba(0,0,0,.06); }
+      code { background: #fff; padding: .25rem .5rem; border: 1px solid #eee; border-radius: .25rem; }
+      button { padding: .5rem .75rem; border: 1px solid #ccc; border-radius: .5rem; cursor: pointer; }
+      .muted { color: #666; }
+    </style>
+  </head>
+  <body>
+    <div class="box">
+      <h2>Callback</h2>
+      {% if code %}
+        <p>You were supposed to catch this redirect! But since you're already here, here's the authorization code you requested:</p>
+        <p><strong>code:</strong> <code id="auth-code">{{ code }}</code></p>
+        {% if state %}<p class="muted"><strong>state:</strong> <code id="auth-state">{{ state }}</code></p>{% endif %}
+        <p><button id="copy-btn">Copy code to clipboard</button></p>
+      {% else %}
+        <p>No <code>code</code> parameter was found on this URL.</p>
+      {% endif %}
+    </div>
+    <script>
+      (function () {
+        var btn = document.getElementById('copy-btn');
+        if (!btn) return;
+        btn.addEventListener('click', function () {
+          var el = document.getElementById('auth-code');
+          if (!el) return;
+          var text = el.textContent || el.innerText;
+          navigator.clipboard.writeText(text).then(function () {
+            btn.textContent = 'Copied!';
+            setTimeout(function(){ btn.textContent = 'Copy code to clipboard'; }, 1500);
+          }, function () {
+            var range = document.createRange();
+            range.selectNode(el);
+            var sel = window.getSelection();
+            sel.removeAllRanges();
+            sel.addRange(range);
+            try { document.execCommand('copy'); btn.textContent = 'Copied!'; } catch(e) {}
+            setTimeout(function(){ btn.textContent = 'Copy code to clipboard'; }, 1500);
+          });
+        });
+      })();
+    </script>
+  </body>
+</html>

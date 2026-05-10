@@ -1,0 +1,189 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+      - feature/**
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  lint:
+    name: Lint and Format Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install black ruff
+
+      - name: Check code formatting with black
+        run: black --check --target-version py312 mock_oidc tests
+
+      - name: Lint with ruff
+        run: ruff check mock_oidc tests
+
+  test:
+    name: Test Python ${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ['3.10', '3.11', '3.12']
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+          pip install pytest-cov coverage
+
+      - name: Run pytest with coverage
+        run: |
+          pytest tests/ --cov=mock_oidc --cov-report=term-missing --cov-report=xml
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          file: ./coverage.xml
+          flags: unittests
+          name: codecov-${{ matrix.python-version }}
+          fail_ci_if_error: false
+
+      - name: Check coverage meets 85% threshold
+        run: |
+          coverage report --fail-under=85
+
+  type-check:
+    name: Type Check with mypy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install mypy types-pyjwt
+
+      - name: Run mypy
+        run: mypy mock_oidc --ignore-missing-imports || true
+
+  security:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install bandit
+
+      - name: Run bandit security check
+        run: bandit -r mock_oidc -f json -o bandit-report.json || true
+
+      - name: Display bandit results
+        run: bandit -r mock_oidc
+
+  docker:
+    name: Docker Build and Smoke Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: false
+          tags: mock-oidc-provider:test
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build image for smoke test
+        run: docker build -t mock-oidc-provider:test .
+
+      - name: Run container and test /health endpoint
+        run: |
+          # Start the container in the background
+          docker run -d \
+            --name mock-oidc-test \
+            -p 4567:4567 \
+            mock-oidc-provider:test
+
+          # Wait for container to start
+          sleep 5
+
+          # Check if container is still running
+          if ! docker ps | grep -q mock-oidc-test; then
+            echo "Container failed to start"
+            docker logs mock-oidc-test
+            exit 1
+          fi
+
+          # Test /health endpoint with insecure flag for self-signed certs
+          echo "Testing /health endpoint..."
+          max_attempts=10
+          attempt=0
+          while [ $attempt -lt $max_attempts ]; do
+            response=$(curl -s -k -w "\n%{http_code}" https://localhost:4567/health || echo "000")
+            http_code=$(echo "$response" | tail -n1)
+            body=$(echo "$response" | head -n-1)
+
+            if [ "$http_code" = "200" ]; then
+              echo "Health check passed: $body"
+              break
+            fi
+
+            echo "Attempt $((attempt+1))/$max_attempts: Got HTTP $http_code"
+            attempt=$((attempt+1))
+            sleep 1
+          done
+
+          if [ "$http_code" != "200" ]; then
+            echo "Health check failed after $max_attempts attempts"
+            docker logs mock-oidc-test
+            exit 1
+          fi
+
+          # Cleanup
+          docker stop mock-oidc-test
+          docker rm mock-oidc-test
+
+      - name: Verify image size
+        run: |
+          size=$(docker image inspect mock-oidc-provider:test --format='{{.Size}}')
+          size_mb=$((size / 1024 / 1024))
+          echo "Docker image size: ${size_mb}MB"
+          if [ $size_mb -gt 150 ]; then
+            echo "Warning: Image size (${size_mb}MB) exceeds 150MB target"
+          else
+            echo "Image size is within acceptable limits"
+          fi
